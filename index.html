@@ -545,7 +545,8 @@ const canvasBlob = (cv, q) => new Promise(r => cv.toBlob(r, "image/jpeg", q));
 async function processImage(file){
   const full  = await shrink(file, 1400, 0.85);
   const thumb = await shrink(file, 340, 0.72);
-  return { blob: await canvasBlob(full, 0.85), thumb: thumb.toDataURL("image/jpeg", 0.72) };
+  // file は AI 読み取り用に保持する（保存するのは圧縮版だけ）
+  return { blob: await canvasBlob(full, 0.85), thumb: thumb.toDataURL("image/jpeg", 0.72), file };
 }
 
 /* =========================================================
@@ -869,22 +870,109 @@ async function deleteCard(id){
 const AI_PROMPT = `あなたはサッカー（フットボール）のトレーディングカードを鑑別する専門家です。
 渡された画像はカードの表面と、あれば裏面です。読み取れる情報だけをJSONで返してください。
 
-規則:
-- 画像から確実に読み取れない項目は必ず空文字 "" にする。推測や補完は絶対にしない。
-- 選手名・チーム名はカードの表記どおり（通常はアルファベット）で返す。
+# 最重要の原則
+画像から確実に読み取れない項目は、必ず空文字 "" にしてください。
+推測・補完・一般知識からの補完は絶対に禁止です。空欄は誤りより価値があります。
+
+# brand（メーカー）— 製造会社名だけを入れる
+brand には製造会社名のみを入れます。商品ライン名を含めてはいけません。
+有効な値は原則として次のいずれかです:
+Topps / Panini / Futera / Upper Deck / Leaf / Epoch / BBM / Sportkings / Merlin
+
+正しい例:
+- "TOPPS FINEST" と書かれたカード → brand: "Topps",  product: "Topps Finest"
+- "TOPPS CHROME" と書かれたカード → brand: "Topps",  product: "Topps Chrome"
+- "PANINI PRIZM" と書かれたカード → brand: "Panini", product: "Panini Prizm"
+誤った例（絶対にしない）:
+- brand: "Topps Finest"  ← 商品ライン名が混入している
+- brand: "Topps Chrome"  ← 同上
+
+商品ライン名から製造会社が判る場合は次の対応を使ってください:
+- Topps  … Finest, Chrome, Stadium Club, Merlin, Match Attax, Museum Collection,
+           Inception, Pristine, Definitive, Dynasty, Gold, Flagship
+- Panini … Prizm, Select, Mosaic, Donruss, Score, Optic, Obsidian, Revolution,
+           Immaculate, National Treasures, Chronicles, Eminence, Impeccable
+- Futera … Unique, Fans Selection
+- Epoch / BBM … Jリーグ・日本国内のカード
+
+# product（商品名）— 印字されていなければ空にする
+product は、カード表面または裏面に商品ライン名として実際に印字されている場合のみ入れます。
+印字が見つからなければ、必ず "" を返してください。
+
+商品名と間違えてはいけないもの（これらは product に入れない）:
+- 大会・リーグ名: UEFA Champions League, Premier League, LaLiga, Serie A,
+  Bundesliga, MLS, FIFA World Cup, Copa America, Euro, AFC, Jリーグ
+- クラブ名・代表チーム名、スポンサーロゴ、ライセンス表記
+- 選手のポジション・背番号・国名
+- サブセットや演出の名称: Future Stars, Young Stars, Best of the Best,
+  Signatures, Autographs, Rookie Card, Insert など
+- 著作権表記や製造国の記載
+
+# その他の項目
+- player / team はカード上の表記どおり（通常はアルファベット）。
 - year はカードに書かれたシーズン表記をそのまま（例 "2023-24" や "2022"）。
 - cardNo は番号のみ（"#" は付けない）。裏面の隅や上部にあることが多い。
-- parallel は Silver, Gold, Mojo, Optic Holo, Refractor など、色や加工の名称。
+- parallel は色や加工の名称（Silver, Gold, Mojo, Refractor, Holo, Camo など）。
   無地の基本カードなら "Base" ではなく "" を返す。
-- serial は "12/99" の形式。刻印されていなければ ""。
-- gradeCompany はスラブ（硬質ケース）に入っている場合のみ PSA / BGS / SGC / CGC のいずれか。
+- serial は "12/99" の形式。刻印がなければ ""。
+  **数字が1桁でも判読できない、ぼやけている、光で反射している、見切れている場合は
+  推測せず "" を返すか、値を入れたうえで lowConfidence に "serial" を必ず含める。**
+- gradeCompany はスラブ（硬質ケース）に入っている場合のみ PSA / BGS / SGC / CGC。
   ケースに入っていなければ ""。grade はその数値のみ。
 - isRookie は RC / ROOKIE の表記がある場合のみ true。
-- isAuto は実際の直筆サインが写っている場合のみ true（印刷サインは false）。
+- isAuto は実際の直筆サインが写っている場合のみ true（印刷されたサインは false）。
 - isMem はユニフォーム生地やパッチが埋め込まれている場合のみ true。
 
+# lowConfidence
+自信を持って読み取れなかったキー名を、すべて lowConfidence の配列に入れてください。
+文字がぼやけている、反射している、小さすぎる、一部しか見えない場合は必ず含めます。
+すべて明瞭に読めた場合は空配列 [] にします。
+
 次のキーだけを持つJSONオブジェクトを返してください。説明文は不要です:
-{"player":"","team":"","nationality":"","brand":"","product":"","year":"","cardNo":"","parallel":"","serial":"","gradeCompany":"","grade":"","isRookie":false,"isAuto":false,"isMem":false}`;
+{"player":"","team":"","nationality":"","brand":"","product":"","year":"","cardNo":"","parallel":"","serial":"","gradeCompany":"","grade":"","isRookie":false,"isAuto":false,"isMem":false,"lowConfidence":[]}`;
+
+/** 商品ライン名 → 製造会社 の逆引き（アプリ側の保険） */
+const PRODUCT_BRAND = {
+  topps:  ["finest","chrome","stadium club","merlin","match attax","museum",
+           "inception","pristine","definitive","dynasty","flagship"],
+  panini: ["prizm","select","mosaic","donruss","score","optic","obsidian",
+           "revolution","immaculate","national treasures","chronicles",
+           "eminence","impeccable"],
+  futera: ["unique","fans selection"]
+};
+const KNOWN_BRANDS = ["Topps","Panini","Futera","Upper Deck","Leaf","Epoch",
+                      "BBM","Sportkings","Merlin"];
+
+/** brand に商品ライン名が混入したケースを整える */
+function normalizeAI(d){
+  let brand   = String(d.brand   || "").trim();
+  let product = String(d.product || "").trim();
+
+  if(brand){
+    // "Topps Finest" のように会社名＋余分な語 → 会社名だけに切り出す
+    const hit = KNOWN_BRANDS.find(b => brand.toLowerCase().startsWith(b.toLowerCase()));
+    if(hit && brand.length > hit.length){
+      if(!product) product = brand;   // 元の文字列は商品名として活かす
+      brand = hit;
+    } else if(hit){
+      brand = hit;                     // 大文字小文字の表記を揃える
+    }
+  }
+  // brand が空でも商品名から会社が判るなら補う
+  if(!brand && product){
+    const p = product.toLowerCase();
+    for(const [b, lines] of Object.entries(PRODUCT_BRAND)){
+      if(lines.some(l => p.includes(l))){
+        brand = b.charAt(0).toUpperCase() + b.slice(1);
+        break;
+      }
+    }
+  }
+  d.brand = brand; d.product = product;
+  d.cardNo = String(d.cardNo || "").replace(/^#/, "").trim();
+  if(!Array.isArray(d.lowConfidence)) d.lowConfidence = [];
+  return d;
+}
 
 const AI_FIELDS = [
   ["player","選手名","#e-player"], ["team","チーム","#e-team"], ["nationality","国籍","#e-nat"],
@@ -896,13 +984,22 @@ const AI_FIELDS = [
 
 const blobToB64 = async b => (await blobToDataURL(b)).split(",")[1];
 
-/** 編集画面に今ある画像を base64 で取り出す */
+/** 編集画面に今ある画像を base64 で取り出す。
+ *  撮影直後なら圧縮版ではなく原本を高解像度で送る（シリアルの判読精度が上がる）。 */
 async function editorImagesB64(){
   const out = [];
   for(const side of ["front","back"]){
     const p = pendingImg[side];
     if(p === "REMOVE") continue;
-    if(p){ out.push(await blobToB64(p.blob)); continue; }
+    if(p){
+      let b = p.blob;
+      if(p.file){
+        try { b = await canvasBlob(await shrink(p.file, 2200, 0.92), 0.92) || p.blob; }
+        catch { b = p.blob; }
+      }
+      out.push(await blobToB64(b));
+      continue;
+    }
     if(editing){
       const rec = await dbGet("images", `${editing.id}:${side}`);
       if(rec) out.push(await blobToB64(rec.blob));
@@ -967,9 +1064,10 @@ async function runAI(){
   try{
     const model = S.aiModel || AI_MODELS[prov][0][0];
     const raw = prov === "gemini" ? await callGemini(imgs, key, model) : await callClaude(imgs, key, model);
-    aiResult = parseAIJson(raw);
+    aiResult = normalizeAI(parseAIJson(raw));
     showAIPanel(aiResult);
-    toast("読み取りました。内容を確認してください");
+    const lc = aiResult.lowConfidence.length;
+    toast(lc ? `読み取りました。${lc}項目は要確認です` : "読み取りました。内容を確認してください");
   }catch(err){
     console.error(err);
     let m = err.message || "読み取りに失敗しました";
@@ -985,6 +1083,7 @@ async function runAI(){
 }
 
 function showAIPanel(d){
+  const low = new Set(d.lowConfidence || []);
   const rows = AI_FIELDS.map(([k, label, sel]) => {
     const v = d[k];
     const isBool = typeof v === "boolean";
@@ -992,16 +1091,25 @@ function showAIPanel(d){
     const cur = isBool ? $(sel).checked : $(sel).value.trim();
     const same = isBool ? cur === v : cur === String(v);
     const filled = isBool ? cur : !!cur;
-    return `<label class="airow${same ? " dup" : ""}">
-      <input type="checkbox" data-k="${k}" ${same ? "" : "checked"}>
+    const shaky = low.has(k);
+    // 自信がないと申告された項目は、既定でチェックを外して意識的に選ばせる
+    const checked = !same && !shaky;
+    const tag = shaky ? `<span style="font-size:10px;color:var(--bad);font-weight:700">要確認</span>`
+              : same  ? `<span style="font-size:10px;color:var(--dim)">同じ</span>`
+              : filled ? `<span style="font-size:10px;color:var(--warn)">上書き</span>` : "";
+    return `<label class="airow${same ? " dup" : ""}"${shaky ? ' style="background:rgba(245,82,92,.07)"' : ""}>
+      <input type="checkbox" data-k="${k}" ${checked ? "checked" : ""}>
       <span class="ak">${label}</span>
-      <span class="av">${esc(isBool ? "はい" : v)}</span>
-      ${same ? `<span style="font-size:10px;color:var(--dim)">同じ</span>`
-             : filled ? `<span style="font-size:10px;color:var(--warn)">上書き</span>` : ""}
+      <span class="av">${esc(isBool ? "はい" : v)}</span>${tag}
     </label>`;
   }).filter(Boolean).join("");
 
-  $("#aiRows").innerHTML = rows || `<p class="note">読み取れた項目がありませんでした。写真のピント・明るさを見直すか、文字が写る角度で撮り直してください。</p>`;
+  const warn = low.size
+    ? `<p class="note" style="color:var(--bad);margin-bottom:6px">
+        赤い「要確認」の項目はAIが自信を持てなかったものです。写真と見比べて、正しければチェックを入れてください。</p>`
+    : "";
+
+  $("#aiRows").innerHTML = warn + (rows || `<p class="note">読み取れた項目がありませんでした。写真のピント・明るさを見直すか、文字が写る角度で撮り直してください。</p>`);
   $("#aiPanel").classList.remove("hide");
   $("#aiPanel").scrollIntoView({ behavior:"smooth", block:"nearest" });
 }
