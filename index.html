@@ -276,7 +276,10 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
       キーは<b>このiPhoneのブラウザ内だけ</b>に保存され、GitHubには一切送られません。<br>
       通信はブラウザから各社APIへ直接行われ、写真や情報が私や第三者に渡ることはありません。<br><br>
       <b>Gemini のキー取得</b>：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio ↗</a>
-      でGoogleアカウントからキーを作成。クレジットカード不要、無料枠で1日250回ほど使えます。<br>
+      でGoogleアカウントからキーを作成。クレジットカード不要で無料枠から始められます
+      （<a href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener">現在の上限を確認 ↗</a>）。<br>
+      ※ <b>Google AI Pro / Ultra の契約はここには効きません。</b>あの特典は Gemini アプリと
+      AI Studio の画面内だけのもので、APIキー経由の利用は完全に別会計です。<br>
       <b>Claude のキー取得</b>：<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic Console ↗</a>
       で作成。事前チャージ制（最低$5）で、1枚あたりおよそ0.5〜1円です。
     </p>
@@ -485,9 +488,12 @@ const S = {
 
 const AI_MODELS = {
   gemini: [
-    ["gemini-2.5-flash",      "2.5 Flash — 標準（推奨）"],
-    ["gemini-2.5-flash-lite", "2.5 Flash-Lite — 回数重視"],
-    ["gemini-2.5-pro",        "2.5 Pro — 高精度・低回数"]
+    ["gemini-3.6-flash",      "3.6 Flash — 最新・推奨"],
+    ["gemini-3.5-flash",      "3.5 Flash — 高精度"],
+    ["gemini-3.5-flash-lite", "3.5 Flash-Lite — 高速・低コスト"],
+    ["gemini-3.1-flash-lite", "3.1 Flash-Lite — 高速・低コスト"],
+    ["gemini-2.5-flash",      "2.5 Flash — 旧世代"],
+    ["gemini-2.5-flash-lite", "2.5 Flash-Lite — 旧世代"]
   ],
   claude: [
     ["claude-haiku-4-5-20251001", "Haiku 4.5 — 安価（推奨）"],
