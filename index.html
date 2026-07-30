@@ -30,6 +30,13 @@ header{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.95);
 .logo{font-weight:700;font-size:15px;letter-spacing:.02em;white-space:nowrap}
 .logo span{color:var(--accent)}
 .count{font-size:12px;color:var(--dim);margin-left:auto;white-space:nowrap}
+.sync{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:11px;white-space:nowrap;
+  background:var(--panel2);color:var(--dim)}
+.sync.idle{color:var(--good)}
+.sync.syncing{color:var(--accent)}
+.sync.pending{color:var(--warn)}
+.sync.error{color:var(--bad);background:rgba(245,82,92,.12)}
+details summary::-webkit-details-marker{color:var(--accent)}
 .tabs{display:flex;gap:2px;padding:0 8px 8px}
 .tab{flex:1;padding:8px 4px;background:transparent;border:0;border-radius:8px;
   color:var(--dim);font-size:13px;font-weight:600}
@@ -255,6 +262,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 <header>
   <div class="hbar">
     <div class="logo">CARD <span>VAULT</span></div>
+    <div class="sync hide" id="syncBadge"></div>
     <div class="count" id="hcount"></div>
   </div>
   <div class="tabs">
@@ -314,8 +322,51 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 
 <!-- ============ SETTINGS ============ -->
 <div id="v-settings" class="hide"><main>
-  <fieldset><legend>データのバックアップ</legend>
-    <p class="note">データはこのブラウザの中だけに保存されています。<b style="color:var(--warn)">端末を変える・ブラウザのデータを消す・iOSが領域を解放すると消えます。</b>週に一度はJSONで書き出してください。</p>
+  <fieldset><legend>Google Drive 同期</legend>
+    <div id="gdOff">
+      <p class="note">
+        接続すると、カード情報と写真が<b>保存のたびに自動で Google Drive に保存</b>されます。
+        手動のバックアップは不要になります。<br><br>
+        アクセス権限は <b>このアプリが作ったファイルだけ</b>（drive.file）です。
+        Drive内の他のファイルを読むことはできません。</p>
+
+      <details style="margin-top:12px">
+        <summary style="font-size:12.5px;color:var(--accent);cursor:pointer;padding:6px 0">
+          初回のみ必要な準備（クライアントIDの取得）</summary>
+        <ol class="note" style="padding-left:1.2em;line-height:2">
+          <li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud Console ↗</a> でプロジェクトを新規作成</li>
+          <li><a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">Google Drive API ↗</a> を開いて「有効にする」</li>
+          <li><a href="https://console.cloud.google.com/auth/branding" target="_blank" rel="noopener">OAuth 同意画面 ↗</a> で User Type「外部」を選び、アプリ名と自分のメールを入力</li>
+          <li>「対象」→「テストユーザー」に<b>自分のGoogleアカウント</b>を追加</li>
+          <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">認証情報 ↗</a> →「認証情報を作成」→「OAuth クライアント ID」→ 種類は<b>ウェブアプリケーション</b></li>
+          <li><b>承認済みのJavaScript生成元</b>に、下に表示されているこのアプリのURLを貼り付け</li>
+          <li>作成後に表示される<b>クライアントID</b>をコピーして、下の欄に貼り付け</li>
+        </ol>
+        <p class="note" style="margin-top:6px">このアプリのURL（コピーして6番に貼ってください）：<br>
+          <b id="gdOrigin" style="color:var(--fg);word-break:break-all"></b></p>
+      </details>
+
+      <div class="f" style="margin-top:12px"><label>クライアントID</label>
+        <input id="gd-id" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false"></div>
+      <button class="btn" id="gdConnect" style="width:100%;margin-top:10px">接続する</button>
+    </div>
+
+    <div id="gdOn" class="hide">
+      <p class="note" id="gdStatus"></p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="gdSync">今すぐ同期</button>
+        <button class="btn ghost" id="gdRestore">クラウドから復元</button>
+      </div>
+      <button class="btn ghost" id="gdOffBtn" style="width:100%;margin-top:10px">同期を解除</button>
+      <p class="note" style="margin-top:10px">
+        「クラウドから復元」は、機種変更したときや、この端末のデータが消えたときに使います。
+        <b>この端末の内容は Drive の内容で置き換わります。</b></p>
+    </div>
+  </fieldset>
+
+  <fieldset style="margin-top:14px"><legend>手動バックアップ（任意）</legend>
+    <p class="note">Google Drive 同期を使っていれば、通常この操作は不要です。
+      別の形で控えを持っておきたい場合に使ってください。</p>
     <div class="row" style="margin-top:12px">
       <button class="btn ghost" id="expJson">JSONで書き出し（画像込み）</button>
       <button class="btn ghost" id="expCsv">CSVで書き出し</button>
@@ -639,7 +690,23 @@ const S = {
   get aiKey(){ return localStorage.getItem("cv.aiKey") || ""; },
   set aiKey(v){ localStorage.setItem("cv.aiKey", v); },
   get view(){ return localStorage.getItem("cv.view") === "list" ? "list" : "grid"; },
-  set view(v){ localStorage.setItem("cv.view", v); }
+  set view(v){ localStorage.setItem("cv.view", v); },
+
+  // --- Google Drive 同期 ---
+  get gdId(){ return localStorage.getItem("cv.gdId") || ""; },
+  set gdId(v){ localStorage.setItem("cv.gdId", v); },
+  get gdFolder(){ return localStorage.getItem("cv.gdFolder") || ""; },
+  set gdFolder(v){ localStorage.setItem("cv.gdFolder", v); },
+  get gdMetaFile(){ return localStorage.getItem("cv.gdMetaFile") || ""; },
+  set gdMetaFile(v){ localStorage.setItem("cv.gdMetaFile", v); },
+  get gdLast(){ return +(localStorage.getItem("cv.gdLast") || 0); },
+  set gdLast(v){ localStorage.setItem("cv.gdLast", v); },
+  get gdImgMap(){ try { return JSON.parse(localStorage.getItem("cv.gdImgMap") || "{}"); } catch { return {}; } },
+  set gdImgMap(v){ localStorage.setItem("cv.gdImgMap", JSON.stringify(v)); },
+  get gdPendImg(){ try { return JSON.parse(localStorage.getItem("cv.gdPendImg") || "[]"); } catch { return []; } },
+  set gdPendImg(v){ localStorage.setItem("cv.gdPendImg", JSON.stringify([...new Set(v)])); },
+  get gdDirty(){ return localStorage.getItem("cv.gdDirty") === "1"; },
+  set gdDirty(v){ localStorage.setItem("cv.gdDirty", v ? "1" : "0"); }
 };
 
 const AI_MODELS = {
@@ -1043,20 +1110,24 @@ async function saveCard(){
   };
 
   // 画像の保存
+  const touched = [];
   for(const side of ["front", "back"]){
     const p = pendingImg[side];
     if(p === "REMOVE"){
       await dbDel("images", `${id}:${side}`);
       if(side === "front") c.thumb = null;
+      touched.push(`${id}:${side}`);
     } else if(p){
       await dbPut("images", { key:`${id}:${side}`, cardId:id, side, blob:p.blob });
       if(side === "front") c.thumb = p.thumb;
+      touched.push(`${id}:${side}`);
     }
   }
 
   await dbPut("cards", c);
   const i = cards.findIndex(x => x.id === id);
   if(i >= 0) cards[i] = c; else cards.unshift(c);
+  markDirty(touched);
 
   closeAll();
   refreshOptions(); renderList();
@@ -1069,6 +1140,7 @@ async function deleteCard(id){
   await dbDel("images", `${id}:front`);
   await dbDel("images", `${id}:back`);
   cards = cards.filter(c => c.id !== id);
+  markDirty([`${id}:front`, `${id}:back`]);   // Drive 側の写真も消す
   closeAll(); refreshOptions(); renderList(); toast("削除しました");
 }
 
@@ -1662,6 +1734,7 @@ async function bulkSave(){
   $("#bkNext").innerHTML = `<i class="spin"></i>登録中…`;
 
   const now = Date.now();
+  const touched = [];
   let n = 0;
   for(const it of targets){
     const d = it.data || {};
@@ -1685,12 +1758,16 @@ async function bulkSave(){
     };
     for(const side of ["front","back"]){
       const p = it.img[side];
-      if(p) await dbPut("images", { key:`${id}:${side}`, cardId:id, side, blob:p.blob });
+      if(p){
+        await dbPut("images", { key:`${id}:${side}`, cardId:id, side, blob:p.blob });
+        touched.push(`${id}:${side}`);
+      }
     }
     await dbPut("cards", c);
     cards.unshift(c);
     n++;
   }
+  markDirty(touched);
 
   cards.sort((a, b) => b.createdAt - a.createdAt);
   closeAll(); bulkReset();
@@ -1877,6 +1954,7 @@ async function savePriceResult(){
   }]);
 
   await dbPut("cards", c);
+  markDirty();
   priceResult = null;
   renderList();
   openDetail(cardId);
@@ -1979,6 +2057,297 @@ async function openDetail(id){
 }
 
 /* =========================================================
+   Google Drive 同期
+   権限は drive.file（このアプリが作ったファイルのみ）。Drive内の他のファイルには触れない。
+   保存構成:  マイドライブ/CardVault/
+              ├ cardvault-data.json      … カード情報（サムネイルは除く）
+              └ img_<cardId>_<面>.jpg    … 写真1枚につき1ファイル
+   サムネイルは同期しない（毎回1MB超の再送になるため）。復元時に写真から作り直す。
+   ========================================================= */
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_FOLDER = "CardVault";
+const DRIVE_META = "cardvault-data.json";
+
+let gis = null, gTok = { token:null, exp:0 }, gPending = null;
+let syncState = "off";      // off | idle | syncing | pending | error
+let syncTimer = null, syncBusy = false;
+
+function syncBadge(msg){
+  const el = $("#syncBadge"); if(!el) return;
+  const label = {
+    off:"", idle:"✓ 同期済み", syncing:"⟳ 同期中…",
+    pending:"… 未同期", error:"⚠ 同期エラー"
+  }[syncState];
+  el.textContent = msg || label;
+  el.className = "sync " + syncState;
+  el.classList.toggle("hide", syncState === "off");
+}
+
+function loadGis(){
+  if(window.google?.accounts?.oauth2) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = res;
+    s.onerror = () => rej(new Error("Googleのログイン部品を読み込めませんでした"));
+    document.head.appendChild(s);
+  });
+}
+
+/** アクセストークンを用意する。interactive=true なら同意画面を出してよい。 */
+async function ensureToken(interactive){
+  if(gTok.token && Date.now() < gTok.exp - 60000) return gTok.token;
+  const cid = S.gdId;
+  if(!cid) throw new Error("クライアントIDが設定されていません");
+  await loadGis();
+
+  if(!gis){
+    gis = google.accounts.oauth2.initTokenClient({
+      client_id: cid, scope: DRIVE_SCOPE,
+      callback: r => {
+        if(r.access_token){
+          gTok = { token:r.access_token, exp: Date.now() + (r.expires_in || 3600) * 1000 };
+          gPending?.res(gTok.token);
+        } else gPending?.rej(new Error(r.error_description || r.error || "認証に失敗しました"));
+        gPending = null;
+      },
+      error_callback: e => {
+        gPending?.rej(new Error(e?.type === "popup_closed"
+          ? "認証画面が閉じられました" : (e?.message || "認証できませんでした")));
+        gPending = null;
+      }
+    });
+  }
+  return new Promise((res, rej) => {
+    gPending = { res, rej };
+    try { gis.requestAccessToken({ prompt: interactive ? "consent" : "" }); }
+    catch(e){ gPending = null; rej(e); }
+  });
+}
+
+async function dreq(url, opt = {}, retry = true){
+  const t = await ensureToken(false);
+  const r = await fetch(url, { ...opt, headers:{ ...(opt.headers || {}), Authorization:"Bearer " + t } });
+  if(r.status === 401 && retry){ gTok = { token:null, exp:0 }; return dreq(url, opt, false); }
+  if(!r.ok){
+    let m = `Drive エラー (${r.status})`;
+    try { m = (await r.json())?.error?.message || m; } catch {}
+    throw new Error(m);
+  }
+  return r;
+}
+const djson = async (url, opt) => (await dreq(url, opt)).json();
+
+async function driveFolder(){
+  if(S.gdFolder) return S.gdFolder;
+  const q = encodeURIComponent(
+    `name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const j = await djson(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
+  if(j.files?.length){ S.gdFolder = j.files[0].id; return S.gdFolder; }
+  const c = await djson("https://www.googleapis.com/drive/v3/files?fields=id", {
+    method:"POST", headers:{ "content-type":"application/json" },
+    body: JSON.stringify({ name:DRIVE_FOLDER, mimeType:"application/vnd.google-apps.folder" })
+  });
+  S.gdFolder = c.id;
+  return c.id;
+}
+
+/** 新規作成なら POST、既存なら PATCH で中身を差し替える */
+async function driveUpload(name, blob, fileId, parent){
+  const meta = fileId ? { name } : { name, parents:[parent] };
+  const form = new FormData();
+  form.append("metadata", new Blob([JSON.stringify(meta)], { type:"application/json" }));
+  form.append("file", blob);
+  const base = "https://www.googleapis.com/upload/drive/v3/files";
+  const url = fileId ? `${base}/${fileId}?uploadType=multipart&fields=id`
+                     : `${base}?uploadType=multipart&fields=id`;
+  const j = await djson(url, { method: fileId ? "PATCH" : "POST", body: form });
+  return j.id;
+}
+
+async function driveDelete(fileId){
+  try { await dreq(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method:"DELETE" }); }
+  catch(e){ console.warn("削除できませんでした", e); }
+}
+
+/** 変更を記録して、少し待ってからまとめて送る */
+function markDirty(imgKeys = []){
+  if(!S.gdId) return;
+  S.gdDirty = true;
+  if(imgKeys.length) S.gdPendImg = [...S.gdPendImg, ...imgKeys];
+  syncState = "pending"; syncBadge();
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncPush(false), 4000);
+}
+
+async function syncPush(manual){
+  if(!S.gdId || syncBusy) return;
+  if(!manual && !S.gdDirty) return;
+  syncBusy = true; syncState = "syncing"; syncBadge();
+  try{
+    const parent = await driveFolder();
+
+    // 1. 変更のあった写真だけ送る
+    const map = S.gdImgMap;
+    const pend = S.gdPendImg;
+    let n = 0;
+    for(const key of pend){
+      const rec = await dbGet("images", key);
+      if(!rec){                       // 削除された写真
+        if(map[key]){ await driveDelete(map[key]); delete map[key]; }
+      }else{
+        const [cid, side] = key.split(":");
+        const id = await driveUpload(`img_${cid}_${side}.jpg`, rec.blob, map[key], parent);
+        map[key] = id;
+      }
+      n++;
+      syncBadge(`⟳ 写真 ${n}/${pend.length}`);
+      S.gdImgMap = map;
+      S.gdPendImg = pend.slice(n);
+    }
+    S.gdImgMap = map;
+    S.gdPendImg = [];
+
+    // 2. カード情報を送る（サムネイルは容量が大きいので除外）
+    syncBadge("⟳ カード情報を送信中");
+    const slim = cards.map(({ thumb, ...rest }) => rest);
+    const payload = { app:"cardvault", version:1, savedAt:new Date().toISOString(),
+                      rate:S.rate, cards:slim };
+    const blob = new Blob([JSON.stringify(payload)], { type:"application/json" });
+    S.gdMetaFile = await driveUpload(DRIVE_META, blob, S.gdMetaFile, parent);
+
+    S.gdDirty = false; S.gdLast = Date.now();
+    syncState = "idle"; syncBadge();
+    if(manual) toast("Google Drive に保存しました");
+  }catch(e){
+    console.error(e);
+    syncState = "error"; syncBadge();
+    if(manual) alert("同期できませんでした\n\n" + (e.message || ""));
+  }finally{
+    syncBusy = false;
+    renderSettingsSync();
+  }
+}
+
+/** クラウドから全件を復元する（この端末の内容は置き換わる） */
+async function syncRestore(){
+  if(!S.gdId) return;
+  if(!confirm("Google Drive の内容でこの端末のデータを置き換えます。\n\nこの端末にしかないカードは消えます。よろしいですか？")) return;
+
+  const btn = $("#gdRestore");
+  btn.disabled = true; btn.innerHTML = `<i class="spin"></i>復元中…`;
+  try{
+    await ensureToken(false);
+    const parent = await driveFolder();
+    const q = encodeURIComponent(`'${parent}' in parents and trashed=false`);
+    const list = await djson(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1000`);
+    const files = list.files || [];
+    const metaFile = files.find(f => f.name === DRIVE_META);
+    if(!metaFile) throw new Error("保存されたデータが見つかりませんでした");
+
+    const meta = await (await dreq(`https://www.googleapis.com/drive/v3/files/${metaFile.id}?alt=media`)).json();
+    if(!Array.isArray(meta.cards)) throw new Error("データの形式が正しくありません");
+
+    await dbClear("cards"); await dbClear("images");
+
+    // 写真を取り出す
+    const imgFiles = files.filter(f => f.name.startsWith("img_"));
+    const map = {};
+    let i = 0;
+    for(const f of imgFiles){
+      i++;
+      btn.innerHTML = `<i class="spin"></i>写真 ${i}/${imgFiles.length}`;
+      const m = f.name.match(/^img_(.+)_(front|back)\.jpg$/);
+      if(!m) continue;
+      const key = `${m[1]}:${m[2]}`;
+      const blob = await (await dreq(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).blob();
+      await dbPut("images", { key, cardId:m[1], side:m[2], blob });
+      map[key] = f.id;
+    }
+    S.gdImgMap = map;
+
+    // カード情報を戻し、サムネイルを作り直す
+    i = 0;
+    for(const c of meta.cards){
+      i++;
+      btn.innerHTML = `<i class="spin"></i>カード ${i}/${meta.cards.length}`;
+      let thumb = null;
+      const rec = await dbGet("images", `${c.id}:front`);
+      if(rec){
+        try { thumb = (await shrink(rec.blob, 340, 0.72)).toDataURL("image/jpeg", 0.72); } catch {}
+      }
+      await dbPut("cards", { ...c, thumb });
+    }
+    if(meta.rate) S.rate = meta.rate;
+    S.gdMetaFile = metaFile.id;
+
+    cards = await dbAll("cards");
+    cards.sort((a, b) => b.createdAt - a.createdAt);
+    S.gdDirty = false; S.gdLast = Date.now();
+    syncState = "idle"; syncBadge();
+    refreshOptions(); limit = 60; renderList();
+    alert(`${meta.cards.length} 枚を復元しました。`);
+  }catch(e){
+    console.error(e);
+    alert("復元できませんでした\n\n" + (e.message || ""));
+  }finally{
+    btn.disabled = false; btn.textContent = "クラウドから復元";
+    renderSettingsSync();
+  }
+}
+
+async function syncConnect(){
+  const cid = $("#gd-id").value.trim();
+  if(!cid){ toast("クライアントIDを入力してください"); return; }
+  if(!/\.apps\.googleusercontent\.com$/.test(cid)){
+    if(!confirm("クライアントIDの形式が想定と違います。\n通常は .apps.googleusercontent.com で終わります。\n\nこのまま続けますか？")) return;
+  }
+  S.gdId = cid;
+  gis = null; gTok = { token:null, exp:0 };
+  const btn = $("#gdConnect");
+  btn.disabled = true; btn.innerHTML = `<i class="spin"></i>接続中…`;
+  try{
+    await ensureToken(true);
+    await driveFolder();
+    syncState = "pending"; syncBadge();
+    toast("接続しました。最初の同期を始めます");
+    await syncPush(true);
+  }catch(e){
+    S.gdId = cid;   // IDは残す（再試行しやすいように）
+    syncState = "error"; syncBadge();
+    alert("接続できませんでした\n\n" + (e.message || "") +
+      "\n\n・承認済みJavaScript生成元に、このアプリのURLを登録しましたか？\n・Google Drive API を有効にしましたか？");
+  }finally{
+    btn.disabled = false; btn.textContent = "接続する";
+    renderSettingsSync();
+  }
+}
+
+function syncDisconnect(){
+  if(!confirm("同期を解除します。\n\nGoogle Drive 上のデータは残ります。この端末のカードも消えません。")) return;
+  ["cv.gdId","cv.gdFolder","cv.gdMetaFile","cv.gdImgMap","cv.gdPendImg","cv.gdDirty","cv.gdLast"]
+    .forEach(k => localStorage.removeItem(k));
+  gis = null; gTok = { token:null, exp:0 };
+  syncState = "off"; syncBadge();
+  $("#gd-id").value = "";
+  renderSettingsSync();
+  toast("同期を解除しました");
+}
+
+function renderSettingsSync(){
+  const on = !!S.gdId;
+  $("#gdOn").classList.toggle("hide", !on);
+  $("#gdOff").classList.toggle("hide", on);
+  if(!on) return;
+  const last = S.gdLast ? new Date(S.gdLast).toLocaleString("ja-JP") : "まだ同期していません";
+  const pend = S.gdPendImg.length;
+  $("#gdStatus").innerHTML =
+    `状態：<b>${{ idle:"同期済み", syncing:"同期中", pending:"未同期の変更あり", error:"エラー", off:"—" }[syncState]}</b><br>` +
+    `最終同期：${last}` + (pend ? `<br><span style="color:var(--warn)">未送信の写真 ${pend} 枚</span>` : "");
+}
+
+/* =========================================================
    Import / Export
    ========================================================= */
 const blobToDataURL = b => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
@@ -2027,6 +2396,7 @@ async function importJSON(file){
   if(d.rate) S.rate = d.rate;
   cards = await dbAll("cards");
   cards.sort((a, b) => b.createdAt - a.createdAt);
+  markDirty((d.images || []).map(im => im.key));
   refreshOptions(); renderList();
   toast(`${d.cards.length} 枚を読み込みました`);
 }
@@ -2053,7 +2423,7 @@ function bind(){
     $$(".tab").forEach(x => x.classList.remove("on")); t.classList.add("on");
     ["collection","stats","settings"].forEach(v => $("#v-" + v).classList.toggle("hide", v !== t.dataset.view));
     if(t.dataset.view === "stats") renderStats();
-    if(t.dataset.view === "settings") showQuota();
+    if(t.dataset.view === "settings"){ showQuota(); renderSettingsSync(); }
     scrollTo(0, 0);
   });
 
@@ -2148,6 +2518,25 @@ function bind(){
     toast(S.aiProv && S.aiKey ? "保存しました" : "AI読み取りをオフにしました");
   };
 
+  // Google Drive 同期
+  $("#gdOrigin").textContent = location.origin + location.pathname.replace(/[^/]*$/, "");
+  $("#gd-id").value = S.gdId;
+  $("#gdConnect").onclick = syncConnect;
+  $("#gdSync").onclick    = () => syncPush(true);
+  $("#gdRestore").onclick = syncRestore;
+  $("#gdOffBtn").onclick  = syncDisconnect;
+  if(S.gdId){
+    syncState = S.gdDirty || S.gdPendImg.length ? "pending" : "idle";
+    syncBadge();
+    // 前回送りきれなかった分があれば、起動時に片づける
+    if(S.gdDirty || S.gdPendImg.length) setTimeout(() => syncPush(false), 2500);
+  }
+  renderSettingsSync();
+  // 離脱時に未送信があれば知らせる
+  addEventListener("beforeunload", e => {
+    if(S.gdId && (S.gdDirty || S.gdPendImg.length)){ e.preventDefault(); e.returnValue = ""; }
+  });
+
   // 設定
   $("#expJson").onclick = exportJSON;
   $("#expCsv").onclick  = exportCSV;
@@ -2155,8 +2544,10 @@ function bind(){
   $("#rate").value = S.rate;
   $("#saveRate").onclick = () => { S.rate = +$("#rate").value || 155; toast("保存しました"); renderStats(); };
   $("#wipe").onclick = async () => {
-    if(!confirm("全てのカードと写真を削除します。本当によろしいですか？")) return;
-    if(!confirm("取り消せません。先にJSONで書き出しましたか？")) return;
+    if(!confirm("この端末の全てのカードと写真を削除します。本当によろしいですか？")) return;
+    if(!confirm(S.gdId
+      ? "この端末からのみ削除します。Google Drive 側のデータは残るので、\n「クラウドから復元」で戻せます。\n\n続けますか？"
+      : "取り消せません。先にJSONで書き出しましたか？")) return;
     await dbClear("cards"); await dbClear("images");
     cards = []; refreshOptions(); renderList(); toast("削除しました");
   };
