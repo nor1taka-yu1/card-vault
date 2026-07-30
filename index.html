@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1115">
+<title>Card Vault — サッカーカード管理</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+  --fg:#e8eaed; --dim:#9aa3b2; --accent:#4ea1ff; --accent2:#2d6fbf;
+  --good:#3ecf8e; --warn:#f5a524; --bad:#f5525c;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  -webkit-text-size-adjust:100%}
+body{padding-bottom:env(safe-area-inset-bottom)}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--accent)}
+
+/* ---------- header ---------- */
+header{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.95);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hbar{display:flex;align-items:center;gap:10px;padding:10px 12px;padding-top:calc(10px + env(safe-area-inset-top))}
+.logo{font-weight:700;font-size:15px;letter-spacing:.02em;white-space:nowrap}
+.logo span{color:var(--accent)}
+.count{font-size:12px;color:var(--dim);margin-left:auto;white-space:nowrap}
+.tabs{display:flex;gap:2px;padding:0 8px 8px}
+.tab{flex:1;padding:8px 4px;background:transparent;border:0;border-radius:8px;
+  color:var(--dim);font-size:13px;font-weight:600}
+.tab.on{background:var(--panel2);color:var(--fg)}
+
+/* ---------- toolbar ---------- */
+.toolbar{padding:10px 12px;display:flex;flex-direction:column;gap:8px;
+  border-bottom:1px solid var(--line);background:var(--panel)}
+.search{display:flex;gap:8px}
+.search input{flex:1;min-width:0;padding:10px 12px;background:var(--bg);
+  border:1px solid var(--line);border-radius:var(--r);outline:none}
+.search input:focus{border-color:var(--accent)}
+.filters{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.filters::-webkit-scrollbar{height:0}
+.filters select{flex:0 0 auto;padding:7px 26px 7px 9px;background:var(--bg) ;
+  border:1px solid var(--line);border-radius:8px;font-size:12px;outline:none;
+  appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M1 3l4 4 4-4' stroke='%239aa3b2' stroke-width='1.4' fill='none'/></svg>");
+  background-repeat:no-repeat;background-position:right 8px center}
+.filters select.active{border-color:var(--accent);color:var(--accent)}
+.btn{padding:9px 14px;background:var(--accent);color:#fff;border:0;border-radius:var(--r);
+  font-size:13px;font-weight:600;white-space:nowrap}
+.btn.ghost{background:var(--panel2);color:var(--fg);border:1px solid var(--line)}
+.btn.danger{background:var(--bad)}
+.btn:active{opacity:.75}
+
+/* ---------- grid ---------- */
+main{padding:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+@media(max-width:400px){.grid{grid-template-columns:repeat(2,1fr);gap:8px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;display:flex;flex-direction:column}
+.card:active{border-color:var(--accent)}
+.thumb{width:100%;aspect-ratio:5/7;object-fit:cover;background:var(--panel2);display:block}
+.thumb.ph{display:flex;align-items:center;justify-content:center;color:var(--line);font-size:26px}
+.cinfo{padding:7px 8px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.cname{font-size:12.5px;font-weight:700;line-height:1.25;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cmeta{font-size:10.5px;color:var(--dim);line-height:1.3;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cprice{font-size:11.5px;font-weight:700;color:var(--good);margin-top:2px}
+.badges{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
+.bdg{font-size:9px;font-weight:700;padding:1.5px 5px;border-radius:4px;background:var(--panel2);color:var(--dim)}
+.bdg.psa{background:#3a2a10;color:#f5a524}
+.bdg.auto{background:#10303a;color:#4ec9ff}
+.bdg.rc{background:#3a1020;color:#ff7a9a}
+.bdg.sn{background:#2a1a3a;color:#b98cff}
+
+/* ---------- group ---------- */
+.ghead{display:flex;align-items:baseline;gap:8px;margin:18px 0 8px;
+  padding-bottom:6px;border-bottom:1px solid var(--line)}
+.ghead:first-child{margin-top:0}
+.gname{font-size:14px;font-weight:700}
+.gsub{font-size:11px;color:var(--dim);margin-left:auto;white-space:nowrap}
+
+/* ---------- modal ---------- */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:none;
+  overflow-y:auto;-webkit-overflow-scrolling:touch}
+.ov.on{display:block}
+.sheet{max-width:640px;margin:0 auto;min-height:100%;background:var(--bg);
+  border:1px solid var(--line)}
+@media(min-width:660px){.sheet{margin:24px auto;min-height:auto;border-radius:14px;overflow:hidden}}
+.shead{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;
+  padding:12px;padding-top:calc(12px + env(safe-area-inset-top));
+  background:var(--panel);border-bottom:1px solid var(--line)}
+@media(min-width:660px){.shead{padding-top:12px}}
+.stitle{font-size:15px;font-weight:700}
+.sbody{padding:14px;display:flex;flex-direction:column;gap:14px}
+.x{margin-left:auto;background:transparent;border:0;color:var(--dim);font-size:22px;line-height:1;padding:0 4px}
+
+fieldset{border:1px solid var(--line);border-radius:var(--r);padding:12px;margin:0}
+legend{font-size:11px;color:var(--accent);font-weight:700;padding:0 6px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row.one{grid-template-columns:1fr}
+.f{display:flex;flex-direction:column;gap:4px;min-width:0}
+.f label{font-size:11px;color:var(--dim);font-weight:600}
+.f input,.f select,.f textarea{width:100%;padding:9px 10px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;outline:none;font-size:14px}
+.f input:focus,.f select:focus,.f textarea:focus{border-color:var(--accent)}
+.f textarea{resize:vertical;min-height:64px}
+.chk{display:flex;align-items:center;gap:7px;padding:9px 10px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;font-size:13px}
+.chk input{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto}
+
+.imgs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.drop{position:relative;aspect-ratio:5/7;background:var(--panel);border:1.5px dashed var(--line);
+  border-radius:var(--r);overflow:hidden;display:flex;align-items:center;justify-content:center;
+  color:var(--dim);font-size:12px;text-align:center;padding:8px}
+.drop img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+.drop input{position:absolute;inset:0;opacity:0}
+.drop .clr{position:absolute;top:5px;right:5px;z-index:3;background:rgba(0,0,0,.7);
+  border:0;color:#fff;border-radius:6px;font-size:11px;padding:3px 7px}
+
+.sfoot{position:sticky;bottom:0;display:flex;gap:8px;padding:12px;
+  padding-bottom:calc(12px + env(safe-area-inset-bottom));
+  background:var(--panel);border-top:1px solid var(--line)}
+.sfoot .btn{flex:1}
+
+/* ---------- detail ---------- */
+.dimgs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dimgs img{width:100%;border-radius:var(--r);background:#000;object-fit:contain;aspect-ratio:5/7}
+.dtitle{font-size:19px;font-weight:800;line-height:1.3}
+.dsub{font-size:13px;color:var(--dim);margin-top:3px}
+table.kv{width:100%;border-collapse:collapse;font-size:13px}
+table.kv td{padding:7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+table.kv td:first-child{color:var(--dim);width:38%;font-size:12px}
+.links{display:flex;flex-direction:column;gap:7px}
+.lk{display:flex;align-items:center;gap:8px;padding:11px 12px;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);text-decoration:none;color:var(--fg);font-size:13px}
+.lk b{font-weight:700}
+.lk span{margin-left:auto;color:var(--dim);font-size:11px}
+.ph{display:flex;align-items:center;gap:8px;font-size:12px;padding:7px 0;border-bottom:1px solid var(--line)}
+.ph b{margin-left:auto;font-weight:700}
+
+/* ---------- stats ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:13px}
+.kpi .k{font-size:11px;color:var(--dim);font-weight:600}
+.kpi .v{font-size:21px;font-weight:800;margin-top:5px;letter-spacing:-.02em}
+.bars{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.bar{font-size:12px}
+.bar .bt{display:flex;gap:8px;margin-bottom:3px}
+.bar .bt b{margin-left:auto;color:var(--dim);font-weight:600}
+.bar .bg{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden}
+.bar .bf{height:100%;background:var(--accent);border-radius:3px}
+h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
+
+.empty{text-align:center;padding:70px 20px;color:var(--dim);font-size:13px;line-height:1.9}
+.note{font-size:11.5px;color:var(--dim);line-height:1.7}
+.more{width:100%;padding:13px;margin-top:14px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r);color:var(--fg);font-size:13px;font-weight:600}
+.hide{display:none !important}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:999;
+  background:var(--panel2);border:1px solid var(--line);border-radius:22px;
+  padding:10px 20px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;
+  box-shadow:0 8px 28px rgba(0,0,0,.5)}
+.toast.on{opacity:1}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hbar">
+    <div class="logo">CARD <span>VAULT</span></div>
+    <div class="count" id="hcount"></div>
+  </div>
+  <div class="tabs">
+    <button class="tab on" data-view="collection">コレクション</button>
+    <button class="tab" data-view="stats">統計</button>
+    <button class="tab" data-view="settings">設定</button>
+  </div>
+</header>
+
+<!-- ============ COLLECTION ============ -->
+<div id="v-collection">
+  <div class="toolbar">
+    <div class="search">
+      <input id="q" type="search" placeholder="選手名・チーム・商品名・タグで検索" autocomplete="off">
+      <button class="btn" id="btnAdd">＋ 追加</button>
+    </div>
+    <div class="filters">
+      <select id="f-brand"><option value="">メーカー：全て</option></select>
+      <select id="f-year"><option value="">年：全て</option></select>
+      <select id="f-grade">
+        <option value="">鑑定：全て</option>
+        <option value="__raw">生カードのみ</option>
+        <option value="__graded">鑑定済みのみ</option>
+      </select>
+      <select id="f-tag"><option value="">タグ：全て</option></select>
+      <select id="f-sort">
+        <option value="new">並替：追加が新しい順</option>
+        <option value="old">並替：追加が古い順</option>
+        <option value="player">並替：選手名</option>
+        <option value="year">並替：年（新しい順）</option>
+        <option value="mhigh">並替：相場が高い順</option>
+        <option value="phigh">並替：購入額が高い順</option>
+      </select>
+      <select id="f-group">
+        <option value="">グループ：なし</option>
+        <option value="player">グループ：選手別</option>
+        <option value="year">グループ：年別</option>
+        <option value="brand">グループ：メーカー別</option>
+        <option value="product">グループ：商品別</option>
+        <option value="team">グループ：チーム別</option>
+        <option value="grade">グループ：鑑定別</option>
+        <option value="tag">グループ：タグ別</option>
+      </select>
+    </div>
+  </div>
+  <main id="list"></main>
+</div>
+
+<!-- ============ STATS ============ -->
+<div id="v-stats" class="hide"><main id="stats"></main></div>
+
+<!-- ============ SETTINGS ============ -->
+<div id="v-settings" class="hide"><main>
+  <fieldset><legend>データのバックアップ</legend>
+    <p class="note">データはこのブラウザの中だけに保存されています。<b style="color:var(--warn)">端末を変える・ブラウザのデータを消す・iOSが領域を解放すると消えます。</b>週に一度はJSONで書き出してください。</p>
+    <div class="row" style="margin-top:12px">
+      <button class="btn ghost" id="expJson">JSONで書き出し（画像込み）</button>
+      <button class="btn ghost" id="expCsv">CSVで書き出し</button>
+    </div>
+    <div class="row one" style="margin-top:10px">
+      <label class="chk" style="justify-content:center;cursor:pointer">
+        JSONから読み込み（復元）
+        <input type="file" id="impJson" accept="application/json" style="display:none">
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset style="margin-top:14px"><legend>為替レート</legend>
+    <div class="row">
+      <div class="f"><label>1 USD = ? 円</label><input type="number" id="rate" step="0.1"></div>
+      <div class="f"><label>&nbsp;</label><button class="btn ghost" id="saveRate">保存</button></div>
+    </div>
+    <p class="note" style="margin-top:8px">USD建てで入力した金額を、統計で円に換算するときに使います。</p>
+  </fieldset>
+
+  <fieldset style="margin-top:14px"><legend>保存領域</legend>
+    <p class="note" id="quota">確認中…</p>
+  </fieldset>
+
+  <fieldset style="margin-top:14px"><legend>危険な操作</legend>
+    <button class="btn danger" id="wipe" style="width:100%">全データを削除</button>
+  </fieldset>
+
+  <p class="note" style="margin-top:20px;text-align:center">Card Vault v1 — Phase 1（手入力・検索・グルーピング・相場リンク）</p>
+</main></div>
+
+<!-- ============ EDITOR ============ -->
+<div class="ov" id="ovEdit"><div class="sheet">
+  <div class="shead"><div class="stitle" id="edTitle">カードを追加</div>
+    <button class="x" data-close="ovEdit">×</button></div>
+  <div class="sbody">
+    <div class="imgs">
+      <div class="drop" id="dropFront"><span>表面の写真<br>タップして選択</span>
+        <input type="file" accept="image/*" id="fFront"></div>
+      <div class="drop" id="dropBack"><span>裏面の写真<br>タップして選択</span>
+        <input type="file" accept="image/*" id="fBack"></div>
+    </div>
+    <p class="note">写真は自動で圧縮して保存します（長辺1400px）。裏面は型番・シリアルの確認用です。</p>
+
+    <fieldset><legend>選手</legend>
+      <div class="row one"><div class="f"><label>選手名 ※必須</label>
+        <input id="e-player" placeholder="Lamine Yamal" autocomplete="off"></div></div>
+      <div class="row" style="margin-top:10px">
+        <div class="f"><label>クラブ / 代表</label><input id="e-team" placeholder="FC Barcelona" autocomplete="off"></div>
+        <div class="f"><label>国籍</label><input id="e-nat" placeholder="Spain" autocomplete="off"></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>カード情報</legend>
+      <div class="row">
+        <div class="f"><label>メーカー</label><input id="e-brand" list="dl-brand" placeholder="Panini" autocomplete="off"></div>
+        <div class="f"><label>商品名</label><input id="e-product" list="dl-product" placeholder="Prizm" autocomplete="off"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="f"><label>年 / シーズン</label><input id="e-year" list="dl-year" placeholder="2023-24" autocomplete="off"></div>
+        <div class="f"><label>カード番号</label><input id="e-no" placeholder="#12" autocomplete="off"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="f"><label>パラレル / 種類</label><input id="e-parallel" list="dl-parallel" placeholder="Silver / Gold /10" autocomplete="off"></div>
+        <div class="f"><label>シリアル（例 12/99）</label><input id="e-serial" placeholder="12/99" autocomplete="off"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="chk"><input type="checkbox" id="e-rc">ルーキー</label>
+        <label class="chk"><input type="checkbox" id="e-auto">直筆サイン</label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="chk"><input type="checkbox" id="e-mem">ジャージ / パッチ</label>
+        <label class="chk"><input type="checkbox" id="e-sold">手放した</label>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>状態・鑑定</legend>
+      <div class="row">
+        <div class="f"><label>鑑定会社</label>
+          <select id="e-gc"><option value="">生カード（未鑑定）</option>
+            <option>PSA</option><option>BGS</option><option>SGC</option>
+            <option>CGC</option><option>HGA</option><option>その他</option></select></div>
+        <div class="f"><label>グレード</label><input id="e-grade" placeholder="10" autocomplete="off"></div>
+      </div>
+      <div class="row one" style="margin-top:10px">
+        <div class="f"><label>証明書番号 / 状態メモ</label><input id="e-cert" placeholder="PSA cert 12345678" autocomplete="off"></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>入手情報</legend>
+      <div class="row">
+        <div class="f"><label>購入日</label><input type="date" id="e-pdate"></div>
+        <div class="f"><label>枚数</label><input type="number" id="e-qty" value="1" min="1"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="f"><label>購入金額</label><input type="number" id="e-price" step="0.01" placeholder="12000"></div>
+        <div class="f"><label>通貨</label><select id="e-cur"><option>JPY</option><option>USD</option></select></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="f"><label>購入元</label><input id="e-src" list="dl-src" placeholder="eBay" autocomplete="off"></div>
+        <div class="f"><label>保管場所</label><input id="e-loc" list="dl-loc" placeholder="バインダーA" autocomplete="off"></div>
+      </div>
+    </fieldset>
+
+    <fieldset><legend>相場（手動記録）</legend>
+      <div class="row">
+        <div class="f"><label>現在の相場</label><input type="number" id="e-mkt" step="0.01" placeholder="25000"></div>
+        <div class="f"><label>通貨</label><select id="e-mcur"><option>JPY</option><option>USD</option></select></div>
+      </div>
+      <p class="note" style="margin-top:8px">保存すると相場の履歴が自動で積み上がり、詳細画面で推移を確認できます。詳細画面の「相場を調べる」からeBayの落札価格検索へ直接飛べます。</p>
+    </fieldset>
+
+    <fieldset><legend>その他</legend>
+      <div class="row one"><div class="f"><label>タグ（カンマ区切り）</label>
+        <input id="e-tags" placeholder="お気に入り, 売却検討, ワールドカップ" autocomplete="off"></div></div>
+      <div class="row one" style="margin-top:10px"><div class="f"><label>メモ</label>
+        <textarea id="e-memo" placeholder="入手経緯、状態の気になる点など"></textarea></div></div>
+    </fieldset>
+  </div>
+  <div class="sfoot">
+    <button class="btn ghost" id="edDelete">削除</button>
+    <button class="btn" id="edSave">保存</button>
+  </div>
+</div></div>
+
+<!-- ============ DETAIL ============ -->
+<div class="ov" id="ovView"><div class="sheet">
+  <div class="shead"><div class="stitle">カード詳細</div>
+    <button class="x" data-close="ovView">×</button></div>
+  <div class="sbody" id="vBody"></div>
+  <div class="sfoot">
+    <button class="btn ghost" data-close="ovView">閉じる</button>
+    <button class="btn" id="vEdit">編集</button>
+  </div>
+</div></div>
+
+<datalist id="dl-brand"></datalist>
+<datalist id="dl-product"></datalist>
+<datalist id="dl-year"></datalist>
+<datalist id="dl-parallel"></datalist>
+<datalist id="dl-src"></datalist>
+<datalist id="dl-loc"></datalist>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* =========================================================
+   Storage — IndexedDB
+   cards : メタデータ + サムネイル(dataURL) … 一覧で全件読む
+   images: 原寸画像(Blob)              … 詳細画面でだけ読む
+   ========================================================= */
+const DB_NAME = "cardvault", DB_VER = 1;
+let db;
+
+function openDB(){
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(DB_NAME, DB_VER);
+    rq.onupgradeneeded = e => {
+      const d = e.target.result;
+      if(!d.objectStoreNames.contains("cards"))  d.createObjectStore("cards",  {keyPath:"id"});
+      if(!d.objectStoreNames.contains("images")) d.createObjectStore("images", {keyPath:"key"});
+    };
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror   = () => rej(rq.error);
+  });
+}
+const tx = (store, mode) => db.transaction(store, mode).objectStore(store);
+const req = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+
+const dbAll    = s        => req(tx(s, "readonly").getAll());
+const dbGet    = (s, k)   => req(tx(s, "readonly").get(k));
+const dbPut    = (s, v)   => req(tx(s, "readwrite").put(v));
+const dbDel    = (s, k)   => req(tx(s, "readwrite").delete(k));
+const dbClear  = s        => req(tx(s, "readwrite").clear());
+
+/* =========================================================
+   State
+   ========================================================= */
+let cards = [];                 // 全件（メタ＋サムネ）
+let editing = null;             // 編集中のカード
+let pendingImg = {front:null, back:null};   // {blob, thumb} 未保存の画像
+let viewingId = null;
+let limit = 60;                 // 段階描画
+
+const S = {
+  get rate(){ return +(localStorage.getItem("cv.rate") || 155); },
+  set rate(v){ localStorage.setItem("cv.rate", v); }
+};
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
+const toJPY = (v, cur) => !v ? 0 : (cur === "USD" ? v * S.rate : v);
+
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), 2200);
+}
+
+/** カード名の組み立て（検索クエリにも使う） */
+function cardTitle(c){
+  return [c.year, c.brand, c.product, c.parallel, c.player, c.cardNo]
+    .filter(Boolean).join(" ");
+}
+function gradeLabel(c){
+  return c.gradeCompany ? `${c.gradeCompany} ${c.grade || ""}`.trim() : "生カード";
+}
+function marketJPY(c){ return toJPY(c.marketPrice, c.marketCurrency); }
+function purchaseJPY(c){ return toJPY(c.purchasePrice, c.purchaseCurrency) * (c.quantity || 1); }
+
+/* =========================================================
+   画像圧縮
+   ========================================================= */
+async function shrink(file, max, quality){
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  return cv;
+}
+const canvasBlob = (cv, q) => new Promise(r => cv.toBlob(r, "image/jpeg", q));
+
+async function processImage(file){
+  const full  = await shrink(file, 1400, 0.85);
+  const thumb = await shrink(file, 340, 0.72);
+  return { blob: await canvasBlob(full, 0.85), thumb: thumb.toDataURL("image/jpeg", 0.72) };
+}
+
+/* =========================================================
+   Filtering / Sorting / Grouping
+   ========================================================= */
+function visibleCards(){
+  const q      = $("#q").value.trim().toLowerCase();
+  const brand  = $("#f-brand").value;
+  const year   = $("#f-year").value;
+  const grade  = $("#f-grade").value;
+  const tag    = $("#f-tag").value;
+  const sort   = $("#f-sort").value;
+
+  let out = cards.filter(c => {
+    if(brand && c.brand !== brand) return false;
+    if(year  && c.year  !== year)  return false;
+    if(grade === "__raw"    && c.gradeCompany) return false;
+    if(grade === "__graded" && !c.gradeCompany) return false;
+    if(tag && !(c.tags || []).includes(tag)) return false;
+    if(q){
+      const hay = [c.player, c.team, c.nationality, c.brand, c.product, c.year,
+                   c.cardNo, c.parallel, c.serial, c.memo, c.location,
+                   c.purchaseSource, gradeLabel(c), (c.tags || []).join(" ")]
+                   .join(" ").toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const cmp = {
+    new:    (a, b) => b.createdAt - a.createdAt,
+    old:    (a, b) => a.createdAt - b.createdAt,
+    player: (a, b) => (a.player || "").localeCompare(b.player || "", "ja"),
+    year:   (a, b) => (b.year || "").localeCompare(a.year || ""),
+    mhigh:  (a, b) => marketJPY(b) - marketJPY(a),
+    phigh:  (a, b) => purchaseJPY(b) - purchaseJPY(a)
+  }[sort];
+  return out.sort(cmp);
+}
+
+function groupKeys(c, mode){
+  switch(mode){
+    case "player":  return [c.player || "（未入力）"];
+    case "year":    return [c.year || "（年不明）"];
+    case "brand":   return [c.brand || "（メーカー不明）"];
+    case "product": return [[c.brand, c.product].filter(Boolean).join(" ") || "（商品不明）"];
+    case "team":    return [c.team || "（チーム不明）"];
+    case "grade":   return [gradeLabel(c)];
+    case "tag":     return (c.tags || []).length ? c.tags : ["（タグなし）"];
+  }
+  return [""];
+}
+
+/* =========================================================
+   Render — collection
+   ========================================================= */
+function cardHTML(c){
+  const th = c.thumb
+    ? `<img class="thumb" src="${c.thumb}" alt="" loading="lazy">`
+    : `<div class="thumb ph">⚽</div>`;
+  const b = [];
+  if(c.gradeCompany) b.push(`<i class="bdg psa">${esc(gradeLabel(c))}</i>`);
+  if(c.isAuto)   b.push(`<i class="bdg auto">AUTO</i>`);
+  if(c.isRookie) b.push(`<i class="bdg rc">RC</i>`);
+  if(c.serial)   b.push(`<i class="bdg sn">/${esc(String(c.serial).split("/").pop())}</i>`);
+  if(c.isMem)    b.push(`<i class="bdg">MEM</i>`);
+  if(c.isSold)   b.push(`<i class="bdg">手放し済</i>`);
+  const meta = [c.year, c.brand, c.product].filter(Boolean).join(" ");
+  const mk = marketJPY(c);
+  return `<article class="card" data-id="${c.id}">
+    ${th}
+    <div class="cinfo">
+      <div class="cname">${esc(c.player || "（無題）")}</div>
+      <div class="cmeta">${esc(meta || "—")}</div>
+      ${c.parallel ? `<div class="cmeta">${esc(c.parallel)}</div>` : ""}
+      ${mk ? `<div class="cprice">${yen(mk)}</div>` : ""}
+      ${b.length ? `<div class="badges">${b.join("")}</div>` : ""}
+    </div></article>`;
+}
+
+function renderList(){
+  const el = $("#list");
+  const list = visibleCards();
+  $("#hcount").textContent = cards.length ? `${list.length} / ${cards.length} 枚` : "";
+
+  if(!cards.length){
+    el.innerHTML = `<div class="empty">まだカードがありません。<br>右上の「＋ 追加」から登録してください。<br><br>
+      まずは手持ちの10枚を入れてみて、<br>足りない項目がないか確かめるのがおすすめです。</div>`;
+    return;
+  }
+  if(!list.length){ el.innerHTML = `<div class="empty">条件に合うカードがありません。</div>`; return; }
+
+  const mode = $("#f-group").value;
+  let html = "";
+
+  if(!mode){
+    const shown = list.slice(0, limit);
+    html = `<div class="grid">${shown.map(cardHTML).join("")}</div>`;
+    if(list.length > limit) html += `<button class="more" id="more">さらに表示（残り ${list.length - limit} 枚）</button>`;
+  } else {
+    const g = new Map();
+    list.forEach(c => groupKeys(c, mode).forEach(k => { if(!g.has(k)) g.set(k, []); g.get(k).push(c); }));
+    const groups = [...g.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "ja"));
+    html = groups.map(([name, arr]) => {
+      const qty = arr.reduce((s, c) => s + (c.quantity || 1), 0);
+      const mkt = arr.reduce((s, c) => s + marketJPY(c) * (c.quantity || 1), 0);
+      return `<div class="ghead"><div class="gname">${esc(name)}</div>
+        <div class="gsub">${qty} 枚${mkt ? " ・ " + yen(mkt) : ""}</div></div>
+        <div class="grid">${arr.map(cardHTML).join("")}</div>`;
+    }).join("");
+  }
+  el.innerHTML = html;
+  $("#more")?.addEventListener("click", () => { limit += 60; renderList(); });
+  $$(".filters select").forEach(s => s.classList.toggle("active", !!s.value && s.id !== "f-sort" && s.id !== "f-group"));
+}
+
+/* datalist と絞り込みselectの選択肢を作り直す */
+function refreshOptions(){
+  const uniq = f => [...new Set(cards.map(f).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), "ja"));
+  const fill = (sel, vals, label) => {
+    const keep = sel.value;
+    const head = [...sel.querySelectorAll("option")].slice(0, sel.id === "f-grade" ? 3 : 1)
+                  .map(o => o.outerHTML).join("");
+    sel.innerHTML = head + vals.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+    sel.value = vals.includes(keep) || keep === "" || sel.id === "f-grade" ? keep : "";
+  };
+  fill($("#f-brand"), uniq(c => c.brand));
+  fill($("#f-year"),  uniq(c => c.year).reverse());
+  fill($("#f-tag"),   [...new Set(cards.flatMap(c => c.tags || []))].sort());
+
+  const dl = (id, vals) => $(id).innerHTML = vals.map(v => `<option value="${esc(v)}">`).join("");
+  dl("#dl-brand",    uniq(c => c.brand));
+  dl("#dl-product",  uniq(c => c.product));
+  dl("#dl-year",     uniq(c => c.year));
+  dl("#dl-parallel", uniq(c => c.parallel));
+  dl("#dl-src",      uniq(c => c.purchaseSource));
+  dl("#dl-loc",      uniq(c => c.location));
+}
+
+/* =========================================================
+   Render — stats
+   ========================================================= */
+function renderStats(){
+  const live = cards.filter(c => !c.isSold);
+  const qty  = live.reduce((s, c) => s + (c.quantity || 1), 0);
+  const cost = live.reduce((s, c) => s + purchaseJPY(c), 0);
+  const mkt  = live.reduce((s, c) => s + marketJPY(c) * (c.quantity || 1), 0);
+  const priced = live.filter(c => marketJPY(c) > 0).length;
+  const graded = live.filter(c => c.gradeCompany).length;
+
+  const bars = (title, map, unit) => {
+    const arr = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if(!arr.length) return "";
+    const max = arr[0][1];
+    return `<h3 class="sec">${title}</h3><div class="bars">` + arr.map(([k, v]) =>
+      `<div class="bar"><div class="bt"><span>${esc(k)}</span><b>${unit === "yen" ? yen(v) : v + " 枚"}</b></div>
+       <div class="bg"><div class="bf" style="width:${(v / max * 100).toFixed(1)}%"></div></div></div>`).join("") + `</div>`;
+  };
+  const tally = (fn) => { const m = new Map();
+    live.forEach(c => { const k = fn(c); if(k) m.set(k, (m.get(k) || 0) + (c.quantity || 1)); }); return m; };
+
+  const valueByPlayer = new Map();
+  live.forEach(c => { if(marketJPY(c)) valueByPlayer.set(c.player || "（未入力）",
+    (valueByPlayer.get(c.player || "（未入力）") || 0) + marketJPY(c) * (c.quantity || 1)); });
+
+  $("#stats").innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="k">所有枚数</div><div class="v">${qty}</div></div>
+      <div class="kpi"><div class="k">登録件数</div><div class="v">${live.length}</div></div>
+      <div class="kpi"><div class="k">取得原価の合計</div><div class="v">${yen(cost)}</div></div>
+      <div class="kpi"><div class="k">相場の合計</div><div class="v" style="color:var(--good)">${yen(mkt)}</div></div>
+      <div class="kpi"><div class="k">鑑定済み</div><div class="v">${graded}<span style="font-size:13px;color:var(--dim)"> 件</span></div></div>
+      <div class="kpi"><div class="k">相場を入力済み</div><div class="v">${priced}<span style="font-size:13px;color:var(--dim)"> / ${live.length}</span></div></div>
+    </div>
+    ${priced < live.length ? `<p class="note" style="margin-top:12px">相場が未入力のカードが ${live.length - priced} 件あります。合計額はその分だけ実際より低く出ます。</p>` : ""}
+    ${bars("選手別 保有枚数", tally(c => c.player), "n")}
+    ${bars("選手別 評価額", valueByPlayer, "yen")}
+    ${bars("メーカー別", tally(c => c.brand), "n")}
+    ${bars("年 / シーズン別", tally(c => c.year), "n")}
+    ${bars("チーム別", tally(c => c.team), "n")}
+    ${bars("保管場所別", tally(c => c.location), "n")}
+    <p class="note" style="margin-top:24px">USD建ての金額は 1USD=${S.rate}円 で換算しています（設定タブで変更可）。</p>`;
+}
+
+/* =========================================================
+   Editor
+   ========================================================= */
+function setDrop(side, thumb){
+  const d = $(side === "front" ? "#dropFront" : "#dropBack");
+  d.querySelector("img")?.remove();
+  d.querySelector(".clr")?.remove();
+  if(!thumb) return;
+  const img = new Image(); img.src = thumb; d.appendChild(img);
+  const b = document.createElement("button");
+  b.className = "clr"; b.textContent = "削除"; b.type = "button";
+  b.onclick = e => { e.preventDefault(); e.stopPropagation();
+    pendingImg[side] = "REMOVE"; setDrop(side, null); };
+  d.appendChild(b);
+}
+
+async function openEditor(card){
+  editing = card;
+  pendingImg = {front:null, back:null};
+  $("#edTitle").textContent = card ? "カードを編集" : "カードを追加";
+  $("#edDelete").classList.toggle("hide", !card);
+
+  const c = card || {};
+  const set = (id, v) => $(id).value = v ?? "";
+  set("#e-player", c.player);   set("#e-team", c.team);       set("#e-nat", c.nationality);
+  set("#e-brand", c.brand);     set("#e-product", c.product); set("#e-year", c.year);
+  set("#e-no", c.cardNo);       set("#e-parallel", c.parallel); set("#e-serial", c.serial);
+  set("#e-gc", c.gradeCompany); set("#e-grade", c.grade);     set("#e-cert", c.cert);
+  set("#e-pdate", c.purchaseDate); set("#e-qty", c.quantity ?? 1);
+  set("#e-price", c.purchasePrice); set("#e-cur", c.purchaseCurrency || "JPY");
+  set("#e-src", c.purchaseSource); set("#e-loc", c.location);
+  set("#e-mkt", c.marketPrice); set("#e-mcur", c.marketCurrency || "JPY");
+  set("#e-tags", (c.tags || []).join(", ")); set("#e-memo", c.memo);
+  $("#e-rc").checked = !!c.isRookie; $("#e-auto").checked = !!c.isAuto;
+  $("#e-mem").checked = !!c.isMem;   $("#e-sold").checked = !!c.isSold;
+
+  setDrop("front", null); setDrop("back", null);
+  if(card){
+    for(const side of ["front", "back"]){
+      const rec = await dbGet("images", `${card.id}:${side}`);
+      if(rec) setDrop(side, URL.createObjectURL(rec.blob));
+    }
+  }
+  $("#fFront").value = ""; $("#fBack").value = "";
+  $("#ovEdit").classList.add("on");
+  document.body.style.overflow = "hidden";
+}
+
+async function saveCard(){
+  const player = $("#e-player").value.trim();
+  if(!player){ toast("選手名を入力してください"); $("#e-player").focus(); return; }
+
+  const now = Date.now();
+  const id  = editing?.id || uid();
+  const mkt = $("#e-mkt").value ? +$("#e-mkt").value : null;
+  const mcur = $("#e-mcur").value;
+
+  // 相場が変わったら履歴に追記
+  const hist = (editing?.priceHistory || []).slice();
+  const prev = editing?.marketPrice ?? null;
+  if(mkt !== null && (mkt !== prev || (editing?.marketCurrency !== mcur))){
+    hist.push({ date: new Date().toISOString().slice(0, 10), price: mkt, currency: mcur });
+  }
+
+  const c = {
+    id,
+    createdAt: editing?.createdAt || now,
+    updatedAt: now,
+    player,
+    team:        $("#e-team").value.trim(),
+    nationality: $("#e-nat").value.trim(),
+    brand:       $("#e-brand").value.trim(),
+    product:     $("#e-product").value.trim(),
+    year:        $("#e-year").value.trim(),
+    cardNo:      $("#e-no").value.trim(),
+    parallel:    $("#e-parallel").value.trim(),
+    serial:      $("#e-serial").value.trim(),
+    isRookie: $("#e-rc").checked, isAuto: $("#e-auto").checked,
+    isMem:    $("#e-mem").checked, isSold: $("#e-sold").checked,
+    gradeCompany: $("#e-gc").value,
+    grade:        $("#e-grade").value.trim(),
+    cert:         $("#e-cert").value.trim(),
+    purchaseDate:     $("#e-pdate").value,
+    quantity:         Math.max(1, +$("#e-qty").value || 1),
+    purchasePrice:    $("#e-price").value ? +$("#e-price").value : null,
+    purchaseCurrency: $("#e-cur").value,
+    purchaseSource:   $("#e-src").value.trim(),
+    location:         $("#e-loc").value.trim(),
+    marketPrice: mkt, marketCurrency: mcur,
+    marketUpdatedAt: mkt !== null ? now : (editing?.marketUpdatedAt || null),
+    priceHistory: hist,
+    tags: $("#e-tags").value.split(",").map(s => s.trim()).filter(Boolean),
+    memo: $("#e-memo").value.trim(),
+    thumb: editing?.thumb || null
+  };
+
+  // 画像の保存
+  for(const side of ["front", "back"]){
+    const p = pendingImg[side];
+    if(p === "REMOVE"){
+      await dbDel("images", `${id}:${side}`);
+      if(side === "front") c.thumb = null;
+    } else if(p){
+      await dbPut("images", { key:`${id}:${side}`, cardId:id, side, blob:p.blob });
+      if(side === "front") c.thumb = p.thumb;
+    }
+  }
+
+  await dbPut("cards", c);
+  const i = cards.findIndex(x => x.id === id);
+  if(i >= 0) cards[i] = c; else cards.unshift(c);
+
+  closeAll();
+  refreshOptions(); renderList();
+  toast(editing ? "更新しました" : "登録しました");
+}
+
+async function deleteCard(id){
+  if(!confirm("このカードを削除します。取り消せません。")) return;
+  await dbDel("cards", id);
+  await dbDel("images", `${id}:front`);
+  await dbDel("images", `${id}:back`);
+  cards = cards.filter(c => c.id !== id);
+  closeAll(); refreshOptions(); renderList(); toast("削除しました");
+}
+
+/* =========================================================
+   Detail
+   ========================================================= */
+function marketLinks(c){
+  const base = [c.year, c.brand, c.product, c.parallel, c.player, c.cardNo?.replace("#", "")]
+    .filter(Boolean).join(" ");
+  const graded = c.gradeCompany ? `${base} ${c.gradeCompany} ${c.grade || ""}` : base;
+  const q = encodeURIComponent(graded.trim());
+  return [
+    { u:`https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&_sop=13`,
+      t:"eBay 落札価格（Sold）", s:"実際に売れた額" },
+    { u:`https://www.ebay.com/sch/i.html?_nkw=${q}&_sop=15`,
+      t:"eBay 出品中", s:"今いくらで売られているか" },
+    { u:`https://jp.mercari.com/search?keyword=${q}&status=sold_out`,
+      t:"メルカリ 売り切れ", s:"国内相場" },
+    { u:`https://www.google.com/search?q=${q}+sold+price`,
+      t:"Google で横断検索", s:"130point / PSA 等" }
+  ];
+}
+
+async function openDetail(id){
+  const c = cards.find(x => x.id === id); if(!c) return;
+  viewingId = id;
+
+  const imgs = [];
+  for(const side of ["front", "back"]){
+    const rec = await dbGet("images", `${id}:${side}`);
+    if(rec) imgs.push(`<img src="${URL.createObjectURL(rec.blob)}" alt="${side}">`);
+  }
+
+  const kv = [
+    ["チーム", c.team], ["国籍", c.nationality],
+    ["年 / シーズン", c.year], ["メーカー", c.brand], ["商品名", c.product],
+    ["カード番号", c.cardNo], ["パラレル", c.parallel], ["シリアル", c.serial],
+    ["鑑定", gradeLabel(c)], ["証明書", c.cert],
+    ["購入日", c.purchaseDate],
+    ["購入金額", c.purchasePrice ? `${c.purchasePrice.toLocaleString()} ${c.purchaseCurrency}` : ""],
+    ["購入元", c.purchaseSource], ["枚数", c.quantity], ["保管場所", c.location],
+    ["タグ", (c.tags || []).join(", ")], ["メモ", c.memo]
+  ].filter(([, v]) => v !== "" && v != null && v !== 0)
+   .map(([k, v]) => `<tr><td>${k}</td><td>${esc(v)}</td></tr>`).join("");
+
+  const attrs = [c.isRookie && "ルーキー", c.isAuto && "直筆サイン",
+                 c.isMem && "ジャージ/パッチ", c.isSold && "手放し済"].filter(Boolean);
+
+  const hist = (c.priceHistory || []).slice().reverse().slice(0, 12)
+    .map(h => `<div class="ph"><span>${h.date}</span><b>${h.currency === "USD" ? "$" : "¥"}${(+h.price).toLocaleString()}</b></div>`).join("");
+
+  $("#vBody").innerHTML = `
+    ${imgs.length ? `<div class="dimgs">${imgs.join("")}</div>` : ""}
+    <div>
+      <div class="dtitle">${esc(c.player || "（無題）")}</div>
+      <div class="dsub">${esc([c.year, c.brand, c.product, c.parallel].filter(Boolean).join(" ") || "—")}</div>
+      ${attrs.length ? `<div class="badges" style="margin-top:8px">${attrs.map(a => `<i class="bdg">${a}</i>`).join("")}</div>` : ""}
+    </div>
+    ${c.marketPrice ? `<div class="kpi"><div class="k">現在の相場</div>
+      <div class="v" style="color:var(--good)">${c.marketCurrency === "USD" ? "$" : "¥"}${(+c.marketPrice).toLocaleString()}</div>
+      ${c.purchasePrice ? `<div class="k" style="margin-top:6px">取得原価 ${yen(toJPY(c.purchasePrice, c.purchaseCurrency))} → 評価 ${yen(marketJPY(c))}</div>` : ""}
+      </div>` : ""}
+
+    <fieldset><legend>相場を調べる</legend><div class="links">
+      ${marketLinks(c).map(l => `<a class="lk" href="${l.u}" target="_blank" rel="noopener">
+        <b>${l.t}</b><span>${l.s} ↗</span></a>`).join("")}
+    </div>
+    <p class="note" style="margin-top:10px">調べた額は「編集」→ 相場欄に入れると履歴として残ります。</p></fieldset>
+
+    ${hist ? `<fieldset><legend>相場の履歴</legend>${hist}</fieldset>` : ""}
+    <fieldset><legend>登録情報</legend><table class="kv">${kv}</table></fieldset>`;
+
+  $("#ovView").classList.add("on");
+  document.body.style.overflow = "hidden";
+}
+
+/* =========================================================
+   Import / Export
+   ========================================================= */
+const blobToDataURL = b => new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+const dataURLtoBlob = async d => (await fetch(d)).blob();
+
+function download(name, blob){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+async function exportJSON(){
+  toast("書き出し中…");
+  const images = await dbAll("images");
+  const packed = [];
+  for(const im of images) packed.push({ key:im.key, cardId:im.cardId, side:im.side, data: await blobToDataURL(im.blob) });
+  const payload = { app:"cardvault", version:1, exportedAt:new Date().toISOString(), rate:S.rate, cards, images:packed };
+  download(`cardvault-${new Date().toISOString().slice(0,10)}.json`,
+           new Blob([JSON.stringify(payload)], {type:"application/json"}));
+  toast(`${cards.length}枚を書き出しました`);
+}
+
+function exportCSV(){
+  const cols = ["player","team","nationality","year","brand","product","cardNo","parallel","serial",
+    "isRookie","isAuto","isMem","gradeCompany","grade","cert","purchaseDate","purchasePrice",
+    "purchaseCurrency","purchaseSource","quantity","location","marketPrice","marketCurrency","tags","memo","isSold"];
+  const head = ["選手名","チーム","国籍","年","メーカー","商品名","カード番号","パラレル","シリアル",
+    "ルーキー","サイン","メモラビリア","鑑定会社","グレード","証明書","購入日","購入金額",
+    "購入通貨","購入元","枚数","保管場所","相場","相場通貨","タグ","メモ","手放し済"];
+  const cell = v => Array.isArray(v) ? `"${v.join(";")}"`
+    : typeof v === "boolean" ? (v ? "1" : "")
+    : v == null ? "" : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const rows = [head.join(","), ...cards.map(c => cols.map(k => cell(c[k])).join(","))];
+  download(`cardvault-${new Date().toISOString().slice(0,10)}.csv`,
+           new Blob(["﻿" + rows.join("\r\n")], {type:"text/csv;charset=utf-8"}));
+  toast("CSVを書き出しました");
+}
+
+async function importJSON(file){
+  let d; try { d = JSON.parse(await file.text()); } catch { return toast("ファイルを読めませんでした"); }
+  if(d.app !== "cardvault" || !Array.isArray(d.cards)) return toast("Card Vault のファイルではありません");
+  if(!confirm(`${d.cards.length} 枚を読み込みます。同じIDのカードは上書きされます。`)) return;
+  toast("読み込み中…");
+  for(const c of d.cards) await dbPut("cards", c);
+  for(const im of (d.images || [])) await dbPut("images", { key:im.key, cardId:im.cardId, side:im.side, blob: await dataURLtoBlob(im.data) });
+  if(d.rate) S.rate = d.rate;
+  cards = await dbAll("cards");
+  cards.sort((a, b) => b.createdAt - a.createdAt);
+  refreshOptions(); renderList();
+  toast(`${d.cards.length} 枚を読み込みました`);
+}
+
+async function showQuota(){
+  if(!navigator.storage?.estimate) return $("#quota").textContent = "この環境では確認できません。";
+  const { usage, quota } = await navigator.storage.estimate();
+  const mb = n => (n / 1048576).toFixed(1) + " MB";
+  $("#quota").innerHTML = `使用中 <b>${mb(usage)}</b> / 上限の目安 <b>${(quota / 1073741824).toFixed(1)} GB</b><br>
+    カード ${cards.length} 枚（1枚あたり写真2枚でおよそ 0.4MB）`;
+}
+
+/* =========================================================
+   Wiring
+   ========================================================= */
+function closeAll(){
+  $$(".ov").forEach(o => o.classList.remove("on"));
+  document.body.style.overflow = "";
+}
+
+function bind(){
+  // タブ
+  $$(".tab").forEach(t => t.onclick = () => {
+    $$(".tab").forEach(x => x.classList.remove("on")); t.classList.add("on");
+    ["collection","stats","settings"].forEach(v => $("#v-" + v).classList.toggle("hide", v !== t.dataset.view));
+    if(t.dataset.view === "stats") renderStats();
+    if(t.dataset.view === "settings") showQuota();
+    scrollTo(0, 0);
+  });
+
+  // 絞り込み
+  let deb;
+  $("#q").oninput = () => { clearTimeout(deb); deb = setTimeout(() => { limit = 60; renderList(); }, 180); };
+  ["#f-brand","#f-year","#f-grade","#f-tag","#f-sort","#f-group"].forEach(s =>
+    $(s).onchange = () => { limit = 60; renderList(); });
+
+  // 一覧クリック
+  $("#list").onclick = e => {
+    const el = e.target.closest(".card"); if(el) openDetail(el.dataset.id);
+  };
+
+  // 追加 / 編集 / 保存 / 削除
+  $("#btnAdd").onclick = () => openEditor(null);
+  $("#edSave").onclick  = saveCard;
+  $("#edDelete").onclick = () => editing && deleteCard(editing.id);
+  $("#vEdit").onclick = () => { const c = cards.find(x => x.id === viewingId);
+    $("#ovView").classList.remove("on"); openEditor(c); };
+  $$("[data-close]").forEach(b => b.onclick = closeAll);
+  $$(".ov").forEach(o => o.onclick = e => { if(e.target === o) closeAll(); });
+
+  // 画像選択
+  const hook = (input, side) => $(input).onchange = async e => {
+    const f = e.target.files[0]; if(!f) return;
+    try {
+      toast("画像を圧縮中…");
+      pendingImg[side] = await processImage(f);
+      setDrop(side, pendingImg[side].thumb);
+      toast("読み込みました");
+    } catch { toast("この画像は読み込めませんでした"); }
+  };
+  hook("#fFront", "front"); hook("#fBack", "back");
+
+  // 設定
+  $("#expJson").onclick = exportJSON;
+  $("#expCsv").onclick  = exportCSV;
+  $("#impJson").onchange = e => e.target.files[0] && importJSON(e.target.files[0]);
+  $("#rate").value = S.rate;
+  $("#saveRate").onclick = () => { S.rate = +$("#rate").value || 155; toast("保存しました"); renderStats(); };
+  $("#wipe").onclick = async () => {
+    if(!confirm("全てのカードと写真を削除します。本当によろしいですか？")) return;
+    if(!confirm("取り消せません。先にJSONで書き出しましたか？")) return;
+    await dbClear("cards"); await dbClear("images");
+    cards = []; refreshOptions(); renderList(); toast("削除しました");
+  };
+}
+
+/* =========================================================
+   Boot
+   ========================================================= */
+(async function(){
+  try { db = await openDB(); }
+  catch(e){
+    document.body.innerHTML = `<div class="empty" style="padding:60px 24px">
+      <b style="color:var(--bad);font-size:15px">データベースを開けませんでした</b><br><br>
+      このファイルを <b>file:// で直接開いている</b>場合、Chrome / Safari ではデータ保存が
+      ブロックされます。<br><br>Firefox で開くか、GitHub Pages などに置いて
+      <b>https:// のURL</b>からアクセスしてください。</div>`;
+    return;
+  }
+  cards = await dbAll("cards");
+  cards.sort((a, b) => b.createdAt - a.createdAt);
+  bind(); refreshOptions(); renderList();
+
+  // ホーム画面に追加したときの名前
+  const manifest = { name:"Card Vault", short_name:"CardVault", start_url:".",
+    display:"standalone", background_color:"#0f1115", theme_color:"#0f1115" };
+  const link = document.createElement("link");
+  link.rel = "manifest";
+  link.href = "data:application/manifest+json," + encodeURIComponent(JSON.stringify(manifest));
+  document.head.appendChild(link);
+})();
+</script>
+</body>
+</html>
