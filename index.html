@@ -155,6 +155,19 @@ table.kv td:first-child{color:var(--dim);width:38%;font-size:12px}
 .bar .bf{height:100%;background:var(--accent);border-radius:3px}
 h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 
+/* ---------- AI ---------- */
+.airow{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.airow:last-of-type{border-bottom:0}
+.airow input{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto}
+.airow .ak{color:var(--dim);font-size:11.5px;flex:0 0 34%}
+.airow .av{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.airow.dup .av{color:var(--dim);font-weight:400}
+.aibtn{width:100%;padding:12px;background:linear-gradient(135deg,#2d6fbf,#4ea1ff);
+  border:0;border-radius:var(--r);color:#fff;font-size:13.5px;font-weight:700}
+.aibtn:disabled{opacity:.45}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
+  border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
+@keyframes sp{to{transform:rotate(360deg)}}
 .empty{text-align:center;padding:70px 20px;color:var(--dim);font-size:13px;line-height:1.9}
 .note{font-size:11.5px;color:var(--dim);line-height:1.7}
 .more{width:100%;padding:13px;margin-top:14px;background:var(--panel);border:1px solid var(--line);
@@ -239,6 +252,39 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
     </div>
   </fieldset>
 
+  <fieldset style="margin-top:14px"><legend>AI読み取り</legend>
+    <div class="row one">
+      <div class="f"><label>使用するAI</label>
+        <select id="ai-prov">
+          <option value="">使わない</option>
+          <option value="gemini">Google Gemini（無料枠あり）</option>
+          <option value="claude">Anthropic Claude（従量課金・高精度）</option>
+        </select></div>
+    </div>
+    <div class="row one" style="margin-top:10px">
+      <div class="f"><label>モデル</label><select id="ai-model"></select></div>
+    </div>
+    <div class="row one" style="margin-top:10px">
+      <div class="f"><label>APIキー</label>
+        <input type="password" id="ai-key" placeholder="貼り付け" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="aiTest">接続テスト</button>
+      <button class="btn" id="aiSave">保存</button>
+    </div>
+    <p class="note" style="margin-top:10px">
+      キーは<b>このiPhoneのブラウザ内だけ</b>に保存され、GitHubには一切送られません。<br>
+      通信はブラウザから各社APIへ直接行われ、写真や情報が私や第三者に渡ることはありません。<br><br>
+      <b>Gemini のキー取得</b>：<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio ↗</a>
+      でGoogleアカウントからキーを作成。クレジットカード不要、無料枠で1日250回ほど使えます。<br>
+      <b>Claude のキー取得</b>：<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic Console ↗</a>
+      で作成。事前チャージ制（最低$5）で、1枚あたりおよそ0.5〜1円です。
+    </p>
+    <p class="note" style="margin-top:8px;color:var(--warn)">
+      キーを他人に渡さないでください。もし漏れたと思ったら、上のリンク先でそのキーを削除して作り直せば無効化できます。
+    </p>
+  </fieldset>
+
   <fieldset style="margin-top:14px"><legend>為替レート</legend>
     <div class="row">
       <div class="f"><label>1 USD = ? 円</label><input type="number" id="rate" step="0.1"></div>
@@ -270,6 +316,20 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
         <input type="file" accept="image/*" id="fBack"></div>
     </div>
     <p class="note">写真は自動で圧縮して保存します（長辺1400px）。裏面は型番・シリアルの確認用です。</p>
+
+    <button class="aibtn" id="aiRun">✨ 写真からカード情報を読み取る</button>
+    <p class="note hide" id="aiHint">読み取りを使うには、設定タブでAPIキーを登録してください。</p>
+
+    <div id="aiPanel" class="hide">
+      <fieldset><legend>AIの読み取り結果 — 確認してください</legend>
+        <div id="aiRows"></div>
+        <p class="note" style="margin-top:8px">AIは誤読します。特に<b>カード番号・シリアル・パラレル名</b>は写真と必ず見比べてください。</p>
+        <div class="row" style="margin-top:10px">
+          <button class="btn ghost" id="aiCancel" type="button">破棄</button>
+          <button class="btn" id="aiApply" type="button">選んだ項目を反映</button>
+        </div>
+      </fieldset>
+    </div>
 
     <fieldset><legend>選手</legend>
       <div class="row one"><div class="f"><label>選手名 ※必須</label>
@@ -414,7 +474,25 @@ let limit = 60;                 // 段階描画
 
 const S = {
   get rate(){ return +(localStorage.getItem("cv.rate") || 155); },
-  set rate(v){ localStorage.setItem("cv.rate", v); }
+  set rate(v){ localStorage.setItem("cv.rate", v); },
+  get aiProv(){ return localStorage.getItem("cv.aiProv") || ""; },
+  set aiProv(v){ localStorage.setItem("cv.aiProv", v); },
+  get aiModel(){ return localStorage.getItem("cv.aiModel") || ""; },
+  set aiModel(v){ localStorage.setItem("cv.aiModel", v); },
+  get aiKey(){ return localStorage.getItem("cv.aiKey") || ""; },
+  set aiKey(v){ localStorage.setItem("cv.aiKey", v); }
+};
+
+const AI_MODELS = {
+  gemini: [
+    ["gemini-2.5-flash",      "2.5 Flash — 標準（推奨）"],
+    ["gemini-2.5-flash-lite", "2.5 Flash-Lite — 回数重視"],
+    ["gemini-2.5-pro",        "2.5 Pro — 高精度・低回数"]
+  ],
+  claude: [
+    ["claude-haiku-4-5-20251001", "Haiku 4.5 — 安価（推奨）"],
+    ["claude-sonnet-5",           "Sonnet 5 — 高精度"]
+  ]
 };
 
 /* =========================================================
@@ -690,6 +768,12 @@ async function openEditor(card){
     }
   }
   $("#fFront").value = ""; $("#fBack").value = "";
+
+  hideAIPanel();
+  const aiOn = !!(S.aiProv && S.aiKey);
+  $("#aiRun").classList.toggle("hide", !aiOn);
+  $("#aiHint").classList.toggle("hide", aiOn);
+
   $("#ovEdit").classList.add("on");
   document.body.style.overflow = "hidden";
 }
@@ -770,6 +854,194 @@ async function deleteCard(id){
   await dbDel("images", `${id}:back`);
   cards = cards.filter(c => c.id !== id);
   closeAll(); refreshOptions(); renderList(); toast("削除しました");
+}
+
+/* =========================================================
+   AI 読み取り（Phase 3）
+   APIキーは localStorage にのみ保存。通信はブラウザ→各社APIの直接通信。
+   ========================================================= */
+const AI_PROMPT = `あなたはサッカー（フットボール）のトレーディングカードを鑑別する専門家です。
+渡された画像はカードの表面と、あれば裏面です。読み取れる情報だけをJSONで返してください。
+
+規則:
+- 画像から確実に読み取れない項目は必ず空文字 "" にする。推測や補完は絶対にしない。
+- 選手名・チーム名はカードの表記どおり（通常はアルファベット）で返す。
+- year はカードに書かれたシーズン表記をそのまま（例 "2023-24" や "2022"）。
+- cardNo は番号のみ（"#" は付けない）。裏面の隅や上部にあることが多い。
+- parallel は Silver, Gold, Mojo, Optic Holo, Refractor など、色や加工の名称。
+  無地の基本カードなら "Base" ではなく "" を返す。
+- serial は "12/99" の形式。刻印されていなければ ""。
+- gradeCompany はスラブ（硬質ケース）に入っている場合のみ PSA / BGS / SGC / CGC のいずれか。
+  ケースに入っていなければ ""。grade はその数値のみ。
+- isRookie は RC / ROOKIE の表記がある場合のみ true。
+- isAuto は実際の直筆サインが写っている場合のみ true（印刷サインは false）。
+- isMem はユニフォーム生地やパッチが埋め込まれている場合のみ true。
+
+次のキーだけを持つJSONオブジェクトを返してください。説明文は不要です:
+{"player":"","team":"","nationality":"","brand":"","product":"","year":"","cardNo":"","parallel":"","serial":"","gradeCompany":"","grade":"","isRookie":false,"isAuto":false,"isMem":false}`;
+
+const AI_FIELDS = [
+  ["player","選手名","#e-player"], ["team","チーム","#e-team"], ["nationality","国籍","#e-nat"],
+  ["brand","メーカー","#e-brand"], ["product","商品名","#e-product"], ["year","年","#e-year"],
+  ["cardNo","カード番号","#e-no"], ["parallel","パラレル","#e-parallel"], ["serial","シリアル","#e-serial"],
+  ["gradeCompany","鑑定会社","#e-gc"], ["grade","グレード","#e-grade"],
+  ["isRookie","ルーキー","#e-rc"], ["isAuto","直筆サイン","#e-auto"], ["isMem","ジャージ/パッチ","#e-mem"]
+];
+
+const blobToB64 = async b => (await blobToDataURL(b)).split(",")[1];
+
+/** 編集画面に今ある画像を base64 で取り出す */
+async function editorImagesB64(){
+  const out = [];
+  for(const side of ["front","back"]){
+    const p = pendingImg[side];
+    if(p === "REMOVE") continue;
+    if(p){ out.push(await blobToB64(p.blob)); continue; }
+    if(editing){
+      const rec = await dbGet("images", `${editing.id}:${side}`);
+      if(rec) out.push(await blobToB64(rec.blob));
+    }
+  }
+  return out;
+}
+
+async function callGemini(images, key, model){
+  const parts = images.map(d => ({ inline_data:{ mime_type:"image/jpeg", data:d } }));
+  parts.push({ text: AI_PROMPT });
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+    method:"POST", headers:{ "content-type":"application/json" },
+    body: JSON.stringify({ contents:[{ parts }],
+      generationConfig:{ temperature:0, responseMimeType:"application/json" } })
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j?.error?.message || `Gemini エラー (${r.status})`);
+  const t = j?.candidates?.[0]?.content?.parts?.map(p => p.text).join("") || "";
+  if(!t) throw new Error("AIが応答を返しませんでした（安全フィルタの可能性）");
+  return t;
+}
+
+async function callClaude(images, key, model){
+  const content = images.map(d => ({ type:"image", source:{ type:"base64", media_type:"image/jpeg", data:d } }));
+  content.push({ type:"text", text: AI_PROMPT });
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "x-api-key": key,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body: JSON.stringify({ model, max_tokens:1024, temperature:0,
+      messages:[{ role:"user", content }] })
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j?.error?.message || `Claude エラー (${r.status})`);
+  return j?.content?.map(b => b.text || "").join("") || "";
+}
+
+function parseAIJson(text){
+  let t = String(text).trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const s = t.indexOf("{"), e = t.lastIndexOf("}");
+  if(s >= 0 && e > s) t = t.slice(s, e + 1);
+  return JSON.parse(t);
+}
+
+let aiResult = null;
+
+async function runAI(){
+  const prov = S.aiProv, key = S.aiKey;
+  if(!prov || !key){ toast("設定タブでAPIキーを登録してください"); return; }
+
+  const imgs = await editorImagesB64();
+  if(!imgs.length){ toast("先に写真を選んでください"); return; }
+
+  const btn = $("#aiRun");
+  btn.disabled = true;
+  btn.innerHTML = `<i class="spin"></i>読み取り中…（10秒ほど）`;
+  try{
+    const model = S.aiModel || AI_MODELS[prov][0][0];
+    const raw = prov === "gemini" ? await callGemini(imgs, key, model) : await callClaude(imgs, key, model);
+    aiResult = parseAIJson(raw);
+    showAIPanel(aiResult);
+    toast("読み取りました。内容を確認してください");
+  }catch(err){
+    console.error(err);
+    let m = err.message || "読み取りに失敗しました";
+    if(/API key not valid|invalid x-api-key|authentication/i.test(m)) m = "APIキーが正しくありません";
+    else if(/quota|RESOURCE_EXHAUSTED|rate_limit/i.test(m))          m = "利用上限に達しました。時間をおいてください";
+    else if(/credit balance|billing/i.test(m))                        m = "APIの残高が不足しています";
+    else if(/Failed to fetch|NetworkError/i.test(m))                  m = "通信できませんでした。電波とキーをご確認ください";
+    alert("読み取りエラー\n\n" + m);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "✨ 写真からカード情報を読み取る";
+  }
+}
+
+function showAIPanel(d){
+  const rows = AI_FIELDS.map(([k, label, sel]) => {
+    const v = d[k];
+    const isBool = typeof v === "boolean";
+    if(isBool ? !v : !String(v ?? "").trim()) return "";
+    const cur = isBool ? $(sel).checked : $(sel).value.trim();
+    const same = isBool ? cur === v : cur === String(v);
+    const filled = isBool ? cur : !!cur;
+    return `<label class="airow${same ? " dup" : ""}">
+      <input type="checkbox" data-k="${k}" ${same ? "" : "checked"}>
+      <span class="ak">${label}</span>
+      <span class="av">${esc(isBool ? "はい" : v)}</span>
+      ${same ? `<span style="font-size:10px;color:var(--dim)">同じ</span>`
+             : filled ? `<span style="font-size:10px;color:var(--warn)">上書き</span>` : ""}
+    </label>`;
+  }).filter(Boolean).join("");
+
+  $("#aiRows").innerHTML = rows || `<p class="note">読み取れた項目がありませんでした。写真のピント・明るさを見直すか、文字が写る角度で撮り直してください。</p>`;
+  $("#aiPanel").classList.remove("hide");
+  $("#aiPanel").scrollIntoView({ behavior:"smooth", block:"nearest" });
+}
+
+function applyAI(){
+  if(!aiResult) return;
+  const picked = new Set([...$("#aiRows").querySelectorAll("input:checked")].map(i => i.dataset.k));
+  let n = 0;
+  AI_FIELDS.forEach(([k, , sel]) => {
+    if(!picked.has(k)) return;
+    const v = aiResult[k], el = $(sel);
+    if(typeof v === "boolean"){ el.checked = v; n++; return; }
+    const s = String(v ?? "").trim(); if(!s) return;
+    if(el.tagName === "SELECT"){
+      const hit = [...el.options].find(o => o.value.toLowerCase() === s.toLowerCase());
+      if(hit) { el.value = hit.value; n++; }
+    } else { el.value = s; n++; }
+  });
+  hideAIPanel();
+  toast(`${n} 項目を反映しました。内容を確認して保存してください`);
+}
+
+function hideAIPanel(){ aiResult = null; $("#aiPanel").classList.add("hide"); $("#aiRows").innerHTML = ""; }
+
+function fillModelSelect(){
+  const prov = $("#ai-prov").value;
+  const sel = $("#ai-model");
+  sel.innerHTML = (AI_MODELS[prov] || []).map(([v, l]) => `<option value="${v}">${l}</option>`).join("")
+                  || `<option value="">—</option>`;
+  if(S.aiModel && [...sel.options].some(o => o.value === S.aiModel)) sel.value = S.aiModel;
+}
+
+async function testAI(){
+  const prov = $("#ai-prov").value, key = $("#ai-key").value.trim(), model = $("#ai-model").value;
+  if(!prov || !key) return toast("AIとキーを選んでください");
+  const btn = $("#aiTest"); btn.disabled = true; btn.textContent = "接続中…";
+  // 1x1 の白いJPEGで疎通だけ確認する
+  const cv = document.createElement("canvas"); cv.width = cv.height = 8;
+  const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, 8, 8);
+  const b64 = cv.toDataURL("image/jpeg").split(",")[1];
+  try{
+    prov === "gemini" ? await callGemini([b64], key, model) : await callClaude([b64], key, model);
+    alert("接続できました。写真からの読み取りが使えます。");
+  }catch(e){
+    alert("接続できませんでした\n\n" + (e.message || ""));
+  }finally{ btn.disabled = false; btn.textContent = "接続テスト"; }
 }
 
 /* =========================================================
@@ -955,6 +1227,22 @@ function bind(){
     } catch { toast("この画像は読み込めませんでした"); }
   };
   hook("#fFront", "front"); hook("#fBack", "back");
+
+  // AI 読み取り
+  $("#aiRun").onclick    = runAI;
+  $("#aiApply").onclick  = applyAI;
+  $("#aiCancel").onclick = hideAIPanel;
+  $("#ai-prov").value = S.aiProv;
+  fillModelSelect();
+  $("#ai-key").value = S.aiKey;
+  $("#ai-prov").onchange = fillModelSelect;
+  $("#aiTest").onclick = testAI;
+  $("#aiSave").onclick = () => {
+    S.aiProv  = $("#ai-prov").value;
+    S.aiModel = $("#ai-model").value;
+    S.aiKey   = $("#ai-key").value.trim();
+    toast(S.aiProv && S.aiKey ? "保存しました" : "AI読み取りをオフにしました");
+  };
 
   // 設定
   $("#expJson").onclick = exportJSON;
