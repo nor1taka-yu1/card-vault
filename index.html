@@ -76,6 +76,28 @@ main{padding:12px}
 .bdg.rc{background:#3a1020;color:#ff7a9a}
 .bdg.sn{background:#2a1a3a;color:#b98cff}
 
+/* ---------- list view ---------- */
+.list{display:flex;flex-direction:column}
+.lrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
+.lrow:active{background:var(--panel)}
+.lth{width:40px;flex:0 0 40px;aspect-ratio:5/7;object-fit:cover;border-radius:5px;background:var(--panel2)}
+.lth.ph{display:flex;align-items:center;justify-content:center;color:var(--line);font-size:16px}
+.lmain{flex:1;min-width:0}
+.lname{font-size:13.5px;font-weight:700;line-height:1.3;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.lmeta{font-size:11px;color:var(--dim);line-height:1.35;margin-top:1px;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.lmeta.kind{color:#b98cff}
+.lright{flex:0 0 auto;text-align:right;max-width:38%}
+.lprice{font-size:13px;font-weight:700;color:var(--good);white-space:nowrap}
+.lsub{font-size:10px;color:var(--dim);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.lrow .badges{margin-top:3px}
+.seg{display:flex;flex:0 0 auto;background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;overflow:hidden}
+.seg button{padding:7px 10px;background:transparent;border:0;color:var(--dim);
+  font-size:12px;font-weight:600;white-space:nowrap}
+.seg button.on{background:var(--accent);color:#fff}
 /* ---------- group ---------- */
 .ghead{display:flex;align-items:baseline;gap:8px;margin:18px 0 8px;
   padding-bottom:6px;border-bottom:1px solid var(--line)}
@@ -168,6 +190,18 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
   border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
 @keyframes sp{to{transform:rotate(360deg)}}
+/* ---------- price ---------- */
+.pxbox{border:1px solid var(--line);border-radius:var(--r);padding:13px;background:var(--panel);margin-top:10px}
+.pxmain{font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--good)}
+.pxrange{font-size:12px;color:var(--dim);margin-top:3px}
+.pxconf{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;margin-left:7px;vertical-align:3px}
+.pxconf.high{background:#10331f;color:var(--good)}
+.pxconf.mid{background:#3a2a10;color:var(--warn)}
+.pxconf.low{background:#3a1015;color:var(--bad)}
+.pxsrc{display:block;font-size:11.5px;padding:6px 0;border-top:1px solid var(--line);
+  color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stale{font-size:10px;font-weight:700;padding:2px 6px;border-radius:5px;background:var(--panel2);color:var(--dim)}
+.stale.old{background:#3a2a10;color:var(--warn)}
 /* ---------- bulk ---------- */
 .bkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:12px}
 .bkth{position:relative;aspect-ratio:5/7;border-radius:6px;overflow:hidden;background:var(--panel2)}
@@ -239,6 +273,10 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
       <button class="btn ghost" id="btnBulk">一括</button>
     </div>
     <div class="filters">
+      <div class="seg" id="viewSeg">
+        <button data-view="grid" class="on">▦ タイル</button>
+        <button data-view="list">☰ リスト</button>
+      </div>
       <select id="f-brand"><option value="">メーカー：全て</option></select>
       <select id="f-year"><option value="">年：全て</option></select>
       <select id="f-grade">
@@ -254,6 +292,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
         <option value="year">並替：年（新しい順）</option>
         <option value="mhigh">並替：相場が高い順</option>
         <option value="phigh">並替：購入額が高い順</option>
+        <option value="stale">並替：相場が古い・未設定順</option>
       </select>
       <select id="f-group">
         <option value="">グループ：なし</option>
@@ -598,7 +637,9 @@ const S = {
   get aiModel(){ return localStorage.getItem("cv.aiModel") || ""; },
   set aiModel(v){ localStorage.setItem("cv.aiModel", v); },
   get aiKey(){ return localStorage.getItem("cv.aiKey") || ""; },
-  set aiKey(v){ localStorage.setItem("cv.aiKey", v); }
+  set aiKey(v){ localStorage.setItem("cv.aiKey", v); },
+  get view(){ return localStorage.getItem("cv.view") === "list" ? "list" : "grid"; },
+  set view(v){ localStorage.setItem("cv.view", v); }
 };
 
 const AI_MODELS = {
@@ -714,7 +755,9 @@ function visibleCards(){
     player: (a, b) => (a.player || "").localeCompare(b.player || "", "ja"),
     year:   (a, b) => (b.year || "").localeCompare(a.year || ""),
     mhigh:  (a, b) => marketJPY(b) - marketJPY(a),
-    phigh:  (a, b) => purchaseJPY(b) - purchaseJPY(a)
+    phigh:  (a, b) => purchaseJPY(b) - purchaseJPY(a),
+    // 未設定を最優先、次に更新が古い順（相場を埋めていく作業用）
+    stale:  (a, b) => (a.marketUpdatedAt || 0) - (b.marketUpdatedAt || 0)
   }[sort];
   return out.sort(cmp);
 }
@@ -759,6 +802,41 @@ function cardHTML(c){
     </div></article>`;
 }
 
+/** 一覧の1行（リスト方式）
+ *  表示項目：画像 / 選手名 / メーカー / 商品名 / パラレル / シリアル / 購入金額 */
+function rowHTML(c){
+  const th = c.thumb
+    ? `<img class="lth" src="${c.thumb}" alt="" loading="lazy">`
+    : `<div class="lth ph">⚽</div>`;
+
+  const maker = [c.brand, c.product].filter(Boolean).join(" ・ ");
+  const kind  = [c.parallel, c.serial].filter(Boolean).join(" ・ ");
+
+  const price = c.purchasePrice != null && c.purchasePrice !== ""
+    ? `${c.purchaseCurrency === "USD" ? "$" : "¥"}${Number(c.purchasePrice).toLocaleString()}`
+    : null;
+
+  return `<article class="lrow" data-id="${c.id}">
+    ${th}
+    <div class="lmain">
+      <div class="lname">${esc(c.player || "（無題）")}</div>
+      <div class="lmeta">${esc(maker || "—")}</div>
+      ${kind ? `<div class="lmeta kind">${esc(kind)}</div>` : ""}
+    </div>
+    <div class="lright">
+      ${price ? `<div class="lprice">${price}</div><div class="lsub">購入額</div>`
+              : `<div class="lsub">購入額 —</div>`}
+    </div>
+  </article>`;
+}
+
+/** 表示形式に応じてカード群を包む */
+function wrapCards(arr){
+  return S.view === "list"
+    ? `<div class="list">${arr.map(rowHTML).join("")}</div>`
+    : `<div class="grid">${arr.map(cardHTML).join("")}</div>`;
+}
+
 function renderList(){
   const el = $("#list");
   const list = visibleCards();
@@ -775,8 +853,7 @@ function renderList(){
   let html = "";
 
   if(!mode){
-    const shown = list.slice(0, limit);
-    html = `<div class="grid">${shown.map(cardHTML).join("")}</div>`;
+    html = wrapCards(list.slice(0, limit));
     if(list.length > limit) html += `<button class="more" id="more">さらに表示（残り ${list.length - limit} 枚）</button>`;
   } else {
     const g = new Map();
@@ -787,7 +864,7 @@ function renderList(){
       const mkt = arr.reduce((s, c) => s + marketJPY(c) * (c.quantity || 1), 0);
       return `<div class="ghead"><div class="gname">${esc(name)}</div>
         <div class="gsub">${qty} 枚${mkt ? " ・ " + yen(mkt) : ""}</div></div>
-        <div class="grid">${arr.map(cardHTML).join("")}</div>`;
+        ${wrapCards(arr)}`;
     }).join("");
   }
   el.innerHTML = html;
@@ -1636,6 +1713,183 @@ function bulkClose(){
 }
 
 /* =========================================================
+   相場の自動取得（Phase 4）
+   eBay の API はブラウザから直接呼べない（CORS 非対応）ため、
+   Gemini の Google 検索グラウンディングで実売情報を探させ、
+   引用元URLつきの「推定値」として提示する。保存は必ず人の確認を挟む。
+   ========================================================= */
+
+function priceQuery(c){
+  const id = [c.year, c.brand, c.product, c.parallel, c.player,
+              c.cardNo ? "#" + c.cardNo : "", c.serial ? `/${String(c.serial).split("/").pop()}` : "",
+              c.isAuto ? "auto" : "", c.isRookie ? "RC" : ""].filter(Boolean).join(" ");
+  return c.gradeCompany ? `${id} ${c.gradeCompany} ${c.grade || ""}`.trim() : id;
+}
+
+function pricePrompt(c){
+  const cond = c.gradeCompany
+    ? `${c.gradeCompany} ${c.grade || ""} で鑑定済み（スラブ入り）`
+    : `生カード（未鑑定・raw）`;
+  return `あなたはサッカーのトレーディングカードの相場に詳しい査定担当者です。
+Google検索を使って、次のカードの「実際に売れた価格（sold / 落札価格）」を調べてください。
+
+# 対象のカード
+- 選手: ${c.player || "不明"}
+- 年/シーズン: ${c.year || "不明"}
+- メーカー: ${c.brand || "不明"}
+- 商品: ${c.product || "不明"}
+- カード番号: ${c.cardNo || "なし"}
+- パラレル/種類: ${c.parallel || "ベース"}
+- シリアル: ${c.serial || "なし"}
+- 直筆サイン: ${c.isAuto ? "あり" : "なし"} / ジャージ等: ${c.isMem ? "あり" : "なし"}
+- ルーキー: ${c.isRookie ? "はい" : "いいえ"}
+- 状態: ${cond}
+
+# 調べ方
+- eBay の sold/completed（落札済み）を最優先。次に 130point、PriceCharting、
+  SportsCardsPro、Card Ladder。日本国内のカードならメルカリの売り切れも見る。
+- 直近90日以内の取引を優先し、古い記録しかない場合はその旨を note に書く。
+- **状態を必ず一致させること。** 生カードの相場と PSA 10 の相場はまったく別物です。
+  ${c.gradeCompany ? `今回は ${c.gradeCompany} ${c.grade || ""} の相場だけを対象にしてください。` :
+    `今回は生カード（未鑑定）の相場だけを対象にしてください。鑑定済みの取引額を混ぜないでください。`}
+- パラレルとシリアルも一致させること。Base と Gold /10 では価格が桁違いです。
+
+# 厳守すること
+- 該当する取引が見つからない、または情報が不十分な場合は、
+  estimate を null にし、confidence を "low" にしてください。推測で数字を作らないこと。
+- 似ているだけの別カードの価格を流用しないこと。
+
+# 出力
+次のキーだけを持つJSONを返してください。前置きや説明文は不要です。
+{"estimate": 数値またはnull, "low": 数値またはnull, "high": 数値またはnull,
+ "currency": "USD"または"JPY", "sampleCount": 参考にした取引件数の目安,
+ "confidence": "high"|"mid"|"low", "asOf": "直近の取引時期（例: 2026年6月）",
+ "note": "根拠と注意点を日本語で60字程度"}`;
+}
+
+/** Google検索グラウンディング付きで Gemini を呼ぶ */
+async function callGeminiSearch(prompt, key, model){
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+    method:"POST", headers:{ "content-type":"application/json" },
+    body: JSON.stringify({
+      contents:[{ parts:[{ text: prompt }] }],
+      tools:[{ google_search:{} }],          // 検索グラウンディング
+      generationConfig:{ temperature:0 }     // ※ 検索併用時は responseMimeType を指定できない
+    })
+  });
+  const j = await r.json();
+  if(!r.ok) throw new Error(j?.error?.message || `Gemini エラー (${r.status})`);
+  const cand = j?.candidates?.[0];
+  const text = cand?.content?.parts?.map(p => p.text || "").join("") || "";
+  if(!text) throw new Error("AIが応答を返しませんでした");
+  const gm = cand?.groundingMetadata || {};
+  const sources = (gm.groundingChunks || [])
+    .map(g => g.web).filter(Boolean)
+    .map(w => ({ url:w.uri, title:w.title || w.uri }));
+  return { text, sources, queries: gm.webSearchQueries || [] };
+}
+
+let priceResult = null;   // { cardId, data, sources }
+
+async function runPriceLookup(cardId){
+  const c = cards.find(x => x.id === cardId); if(!c) return;
+  if(S.aiProv !== "gemini" || !S.aiKey){
+    alert("相場の自動取得は Gemini でのみ利用できます。\n\n設定タブで「Google Gemini」を選び、APIキーを登録してください。\n" +
+          "（eBay の公式APIはブラウザから直接呼べないため、検索機能を持つ Gemini を使っています）");
+    return;
+  }
+  const btn = $("#pxRun"); if(!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = `<i class="spin"></i>検索して調べています…（20秒ほど）`;
+  try{
+    const model = S.aiModel || AI_MODELS.gemini[0][0];
+    const { text, sources } = await callGeminiSearch(pricePrompt(c), S.aiKey, model);
+    const d = parseAIJson(text);
+    priceResult = { cardId, data:d, sources };
+    renderPriceResult();
+  }catch(e){
+    console.error(e);
+    let m = e.message || "";
+    if(/API key not valid/i.test(m))                  m = "APIキーが正しくありません";
+    else if(/quota|RESOURCE_EXHAUSTED|429/i.test(m))  m = "利用上限に達しました。時間をおいてください";
+    else if(/Failed to fetch/i.test(m))               m = "通信できませんでした";
+    else if(/JSON|Unexpected/i.test(m))               m = "結果を読み取れませんでした。もう一度お試しください";
+    alert("相場を取得できませんでした\n\n" + m);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "✨ AIで相場を調べる";
+  }
+}
+
+function renderPriceResult(){
+  const box = $("#pxPanel"); if(!box || !priceResult) return;
+  const { data:d, sources } = priceResult;
+  const cur  = d.currency === "JPY" ? "¥" : "$";
+  const conf = ["high","mid","low"].includes(d.confidence) ? d.confidence : "low";
+  const confLabel = { high:"信頼度 高", mid:"信頼度 中", low:"信頼度 低" }[conf];
+
+  if(d.estimate == null){
+    box.innerHTML = `<div class="pxbox">
+      <b style="color:var(--warn)">相場が見つかりませんでした</b>
+      <p class="note" style="margin-top:6px">${esc(d.note || "該当する取引が見つかりませんでした。")}</p>
+      <p class="note" style="margin-top:6px">下のリンクから手動で調べて、編集画面で入力してください。</p></div>`;
+    return;
+  }
+
+  box.innerHTML = `<div class="pxbox">
+    <div class="pxmain">${cur}${Number(d.estimate).toLocaleString()}
+      <span class="pxconf ${conf}">${confLabel}</span></div>
+    ${d.low != null && d.high != null
+      ? `<div class="pxrange">取引の幅 ${cur}${Number(d.low).toLocaleString()} 〜 ${cur}${Number(d.high).toLocaleString()}
+         ${d.sampleCount ? ` ／ 参考 ${esc(String(d.sampleCount))} 件` : ""}${d.asOf ? ` ／ ${esc(d.asOf)}` : ""}</div>` : ""}
+    <p class="note" style="margin-top:8px">${esc(d.note || "")}</p>
+    ${conf === "low" ? `<p class="note" style="color:var(--bad);margin-top:6px">
+        信頼度が低い結果です。必ず引用元を確認してください。</p>` : ""}
+    ${sources.length ? `<div style="margin-top:10px">
+        <div class="note" style="margin-bottom:2px">引用元（AIが実際に見たページ）</div>
+        ${sources.slice(0, 6).map(s => `<a class="pxsrc" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)} ↗</a>`).join("")}
+      </div>` : `<p class="note" style="margin-top:8px;color:var(--warn)">引用元が取得できませんでした。数値の裏付けが弱い可能性があります。</p>`}
+    <div class="row" style="margin-top:12px">
+      <button class="btn ghost" id="pxDrop" type="button">破棄</button>
+      <button class="btn" id="pxSave" type="button">この額を相場として記録</button>
+    </div>
+    <p class="note" style="margin-top:8px">記録するとAI推定値として履歴に残ります。実売価格そのものではありません。</p>
+  </div>`;
+
+  $("#pxDrop").onclick = () => { priceResult = null; box.innerHTML = ""; };
+  $("#pxSave").onclick = savePriceResult;
+}
+
+async function savePriceResult(){
+  if(!priceResult) return;
+  const { cardId, data:d } = priceResult;
+  const c = cards.find(x => x.id === cardId); if(!c) return;
+
+  c.marketPrice    = Number(d.estimate);
+  c.marketCurrency = d.currency === "JPY" ? "JPY" : "USD";
+  c.marketUpdatedAt = Date.now();
+  c.updatedAt = Date.now();
+  c.priceHistory = (c.priceHistory || []).concat([{
+    date: new Date().toISOString().slice(0, 10),
+    price: c.marketPrice, currency: c.marketCurrency,
+    source: "AI推定", low: d.low ?? null, high: d.high ?? null,
+    confidence: d.confidence || "low"
+  }]);
+
+  await dbPut("cards", c);
+  priceResult = null;
+  renderList();
+  openDetail(cardId);
+  toast("相場を記録しました");
+}
+
+/** 相場の鮮度 */
+function priceAge(c){
+  if(!c.marketUpdatedAt) return null;
+  return Math.floor((Date.now() - c.marketUpdatedAt) / 86400000);
+}
+
+/* =========================================================
    Detail
    ========================================================= */
 function marketLinks(c){
@@ -1681,7 +1935,13 @@ async function openDetail(id){
                  c.isMem && "ジャージ/パッチ", c.isSold && "手放し済"].filter(Boolean);
 
   const hist = (c.priceHistory || []).slice().reverse().slice(0, 12)
-    .map(h => `<div class="ph"><span>${h.date}</span><b>${h.currency === "USD" ? "$" : "¥"}${(+h.price).toLocaleString()}</b></div>`).join("");
+    .map(h => `<div class="ph"><span>${h.date}</span>
+        <span style="font-size:10px;color:var(--dim)">${esc(h.source || "手動")}</span>
+        <b>${h.currency === "USD" ? "$" : "¥"}${(+h.price).toLocaleString()}</b></div>`).join("");
+
+  const age = priceAge(c);
+  const ageTag = age === null ? ""
+    : `<span class="stale${age > 60 ? " old" : ""}">${age === 0 ? "今日更新" : `${age}日前`}</span>`;
 
   $("#vBody").innerHTML = `
     ${imgs.length ? `<div class="dimgs">${imgs.join("")}</div>` : ""}
@@ -1690,19 +1950,29 @@ async function openDetail(id){
       <div class="dsub">${esc([c.year, c.brand, c.product, c.parallel].filter(Boolean).join(" ") || "—")}</div>
       ${attrs.length ? `<div class="badges" style="margin-top:8px">${attrs.map(a => `<i class="bdg">${a}</i>`).join("")}</div>` : ""}
     </div>
-    ${c.marketPrice ? `<div class="kpi"><div class="k">現在の相場</div>
+    ${c.marketPrice ? `<div class="kpi"><div class="k">現在の相場 ${ageTag}</div>
       <div class="v" style="color:var(--good)">${c.marketCurrency === "USD" ? "$" : "¥"}${(+c.marketPrice).toLocaleString()}</div>
       ${c.purchasePrice ? `<div class="k" style="margin-top:6px">取得原価 ${yen(toJPY(c.purchasePrice, c.purchaseCurrency))} → 評価 ${yen(marketJPY(c))}</div>` : ""}
       </div>` : ""}
 
-    <fieldset><legend>相場を調べる</legend><div class="links">
+    <fieldset><legend>相場を調べる</legend>
+      <button class="aibtn" id="pxRun" type="button">✨ AIで相場を調べる</button>
+      <p class="note" style="margin-top:8px">
+        Googleで実際に検索し、eBayの落札価格などを根拠に推定します（引用元URL付き）。<br>
+        <b>推定値であり、実売価格そのものではありません。</b>必ず引用元を確認してください。</p>
+      <div id="pxPanel"></div>
+
+      <div class="links" style="margin-top:14px">
       ${marketLinks(c).map(l => `<a class="lk" href="${l.u}" target="_blank" rel="noopener">
         <b>${l.t}</b><span>${l.s} ↗</span></a>`).join("")}
-    </div>
-    <p class="note" style="margin-top:10px">調べた額は「編集」→ 相場欄に入れると履歴として残ります。</p></fieldset>
+      </div>
+      <p class="note" style="margin-top:10px">自分で調べた額は「編集」→ 相場欄に入れると履歴として残ります。</p></fieldset>
 
     ${hist ? `<fieldset><legend>相場の履歴</legend>${hist}</fieldset>` : ""}
     <fieldset><legend>登録情報</legend><table class="kv">${kv}</table></fieldset>`;
+
+  priceResult = null;
+  $("#pxRun").onclick = () => runPriceLookup(id);
 
   $("#ovView").classList.add("on");
   document.body.style.overflow = "hidden";
@@ -1793,10 +2063,22 @@ function bind(){
   ["#f-brand","#f-year","#f-grade","#f-tag","#f-sort","#f-group"].forEach(s =>
     $(s).onchange = () => { limit = 60; renderList(); });
 
-  // 一覧クリック
+  // 一覧クリック（タイル・リストどちらも data-id で拾う）
   $("#list").onclick = e => {
-    const el = e.target.closest(".card"); if(el) openDetail(el.dataset.id);
+    const el = e.target.closest("[data-id]"); if(el) openDetail(el.dataset.id);
   };
+
+  // 表示形式の切り替え
+  $$("#viewSeg button").forEach(b => {
+    b.classList.toggle("on", b.dataset.view === S.view);
+    b.onclick = () => {
+      if(S.view === b.dataset.view) return;
+      S.view = b.dataset.view;
+      $$("#viewSeg button").forEach(x => x.classList.toggle("on", x.dataset.view === S.view));
+      renderList();
+      scrollTo(0, 0);
+    };
+  });
 
   // 追加 / 編集 / 保存 / 削除
   $("#btnAdd").onclick = () => openEditor(null);
