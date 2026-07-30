@@ -337,13 +337,26 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
           <li><a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud Console ↗</a> でプロジェクトを新規作成</li>
           <li><a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">Google Drive API ↗</a> を開いて「有効にする」</li>
           <li><a href="https://console.cloud.google.com/auth/branding" target="_blank" rel="noopener">OAuth 同意画面 ↗</a> で User Type「外部」を選び、アプリ名と自分のメールを入力</li>
-          <li>「対象」→「テストユーザー」に<b>自分のGoogleアカウント</b>を追加</li>
+          <li><a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noopener">対象（Audience）↗</a> で <b>「アプリを公開」</b>を押し、公開ステータスを「本番環境」にする</li>
           <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">認証情報 ↗</a> →「認証情報を作成」→「OAuth クライアント ID」→ 種類は<b>ウェブアプリケーション</b></li>
-          <li><b>承認済みのJavaScript生成元</b>に、下に表示されているこのアプリのURLを貼り付け</li>
+          <li><b>承認済みのJavaScript生成元</b>に、下のボタンでコピーした値を貼り付け
+            （リダイレクトURIの設定は不要です）</li>
           <li>作成後に表示される<b>クライアントID</b>をコピーして、下の欄に貼り付け</li>
         </ol>
-        <p class="note" style="margin-top:6px">このアプリのURL（コピーして6番に貼ってください）：<br>
-          <b id="gdOrigin" style="color:var(--fg);word-break:break-all"></b></p>
+        <div style="margin-top:8px">
+          <div class="note">6番に貼り付ける値（ドメインのみ）</div>
+          <button class="btn ghost" id="gdOrigin" style="width:100%;margin-top:5px;word-break:break-all"></button>
+          <p class="note" style="margin-top:6px;color:var(--warn)">
+            ここには<b>ドメインだけ</b>を入れます。<code>/card-vault/</code> のようなパスや、
+            末尾の <code>/</code> を付けると「無効な生成元」と怒られます。</p>
+        </div>
+        <p class="note" style="margin-top:10px">
+          <b>「アクセスをブロック：〜は審査プロセスを完了していません（403 access_denied）」</b>と出たら、
+          手順4の公開ができていません。<a href="https://console.cloud.google.com/auth/audience" target="_blank" rel="noopener">対象（Audience）↗</a>
+          で「アプリを公開」を押してください。<br>
+          テストユーザーとして追加する方法もありますが、<b>7日で承認が切れる</b>ため勧めません。<br><br>
+          このアプリが使う <code>drive.file</code> は Google の分類で<b>非機密スコープ</b>のため、
+          公開しても審査は不要です。公開してもクライアントIDと登録済みドメインを持つあなたしか使えません。</p>
       </details>
 
       <div class="f" style="margin-top:12px"><label>クライアントID</label>
@@ -2519,7 +2532,17 @@ function bind(){
   };
 
   // Google Drive 同期
-  $("#gdOrigin").textContent = location.origin + location.pathname.replace(/[^/]*$/, "");
+  // 承認済みJavaScript生成元は scheme://host[:port] のみ。パスも末尾スラッシュも不可。
+  const origin = location.origin;
+  $("#gdOrigin").textContent = "📋 " + origin;
+  $("#gdOrigin").onclick = async () => {
+    try{
+      await navigator.clipboard.writeText(origin);
+      toast("コピーしました");
+    }catch{
+      prompt("この値をコピーしてください", origin);
+    }
+  };
   $("#gd-id").value = S.gdId;
   $("#gdConnect").onclick = syncConnect;
   $("#gdSync").onclick    = () => syncPush(true);
