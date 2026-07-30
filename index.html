@@ -645,10 +645,27 @@ function purchaseJPY(c){ return toJPY(c.purchasePrice, c.purchaseCurrency) * (c.
 /* =========================================================
    画像圧縮
    ========================================================= */
+/** createImageBitmap は iPhone の HEIC などで失敗することがあるため <img> に退避する */
+async function loadBitmap(file){
+  try{
+    return await createImageBitmap(file);
+  }catch{
+    return await new Promise((res, rej) => {
+      const url = URL.createObjectURL(file);
+      const im = new Image();
+      im.onload  = () => { URL.revokeObjectURL(url); res(im); };
+      im.onerror = () => { URL.revokeObjectURL(url); rej(new Error("画像を読み込めませんでした")); };
+      im.src = url;
+    });
+  }
+}
+
 async function shrink(file, max, quality){
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const bmp = await loadBitmap(file);
+  const iw = bmp.width || bmp.naturalWidth, ih = bmp.height || bmp.naturalHeight;
+  if(!iw || !ih) throw new Error("画像のサイズを取得できませんでした");
+  const scale = Math.min(1, max / Math.max(iw, ih));
+  const w = Math.round(iw * scale), h = Math.round(ih * scale);
   const cv = document.createElement("canvas");
   cv.width = w; cv.height = h;
   cv.getContext("2d").drawImage(bmp, 0, 0, w, h);
@@ -1317,12 +1334,16 @@ async function bulkAddShots(files){
     list.length = room;
   }
 
+  let bad = 0;
   for(const file of list){
     let preview = null;
-    try { preview = (await shrink(file, 160, 0.7)).toDataURL("image/jpeg", 0.7); } catch {}
+    try { preview = (await shrink(file, 160, 0.7)).toDataURL("image/jpeg", 0.7); }
+    catch { bad++; }
     bulk.shots.push({ file, preview });
   }
   bulkRenderShots();
+  toast(bad ? `${list.length}枚を追加（${bad}枚は表示できません）`
+            : `${list.length}枚を追加しました（計 ${bulk.shots.length}枚）`);
 }
 
 function bulkRemoveShot(i){
@@ -1809,11 +1830,12 @@ function bind(){
     $("#ovBulk").classList.add("on");
     document.body.style.overflow = "hidden";
   };
-  // 撮影・選択はどちらも「末尾に追加」。value を空に戻して同じ写真でも再発火させる
+  // 撮影・選択はどちらも「末尾に追加」。
+  // 注意: input.value="" は files を空にするので、必ず先に配列へ写しておく。
   const addShots = async e => {
-    const files = e.target.files;
-    e.target.value = "";
-    await bulkAddShots(files);
+    const files = [...e.target.files];
+    e.target.value = "";                 // 同じ写真でも再度 change を発火させるため
+    if(files.length) await bulkAddShots(files);
   };
   $("#bkShoot").onchange = addShots;
   $("#bkFiles").onchange = addShots;
