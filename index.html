@@ -168,6 +168,29 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
   border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
 @keyframes sp{to{transform:rotate(360deg)}}
+/* ---------- bulk ---------- */
+.bkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:12px}
+.bkth{position:relative;aspect-ratio:5/7;border-radius:6px;overflow:hidden;background:var(--panel2)}
+.bkth img{width:100%;height:100%;object-fit:cover}
+.bkth i{position:absolute;left:3px;top:3px;background:rgba(0,0,0,.75);color:#fff;
+  font-size:9px;font-style:normal;font-weight:700;padding:1px 4px;border-radius:4px}
+.bkth b{position:absolute;right:2px;top:2px;background:rgba(0,0,0,.75);color:#fff;
+  font-size:11px;width:17px;height:17px;line-height:17px;text-align:center;border-radius:50%}
+.pbar{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:10px 0}
+.pbar div{height:100%;background:var(--accent);transition:width .3s}
+.bkrow{display:flex;gap:9px;padding:11px 0;border-bottom:1px solid var(--line)}
+.bkrow.off{opacity:.35}
+.bkrow>img{width:52px;aspect-ratio:5/7;object-fit:cover;border-radius:6px;background:var(--panel2);flex:0 0 auto}
+.bkf{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.bkf input{width:100%;padding:6px 8px;background:var(--panel);border:1px solid var(--line);
+  border-radius:6px;font-size:12.5px;outline:none}
+.bkf input:focus{border-color:var(--accent)}
+.bkf input.shaky{border-color:var(--bad);background:rgba(245,82,92,.07)}
+.bkf input.nm{font-weight:700;font-size:13.5px}
+.bkg{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.bkchk{flex:0 0 auto;display:flex;align-items:flex-start;padding-top:2px}
+.bkchk input{width:19px;height:19px;accent-color:var(--accent)}
+.bkerr{font-size:11px;color:var(--bad)}
 .empty{text-align:center;padding:70px 20px;color:var(--dim);font-size:13px;line-height:1.9}
 .note{font-size:11.5px;color:var(--dim);line-height:1.7}
 .more{width:100%;padding:13px;margin-top:14px;background:var(--panel);border:1px solid var(--line);
@@ -198,8 +221,9 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 <div id="v-collection">
   <div class="toolbar">
     <div class="search">
-      <input id="q" type="search" placeholder="選手名・チーム・商品名・タグで検索" autocomplete="off">
-      <button class="btn" id="btnAdd">＋ 追加</button>
+      <input id="q" type="search" placeholder="選手名・チーム・商品名で検索" autocomplete="off">
+      <button class="btn" id="btnAdd">＋</button>
+      <button class="btn ghost" id="btnBulk">一括</button>
     </div>
     <div class="filters">
       <select id="f-brand"><option value="">メーカー：全て</option></select>
@@ -412,6 +436,74 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
   <div class="sfoot">
     <button class="btn ghost" id="edDelete">削除</button>
     <button class="btn" id="edSave">保存</button>
+  </div>
+</div></div>
+
+<!-- ============ BULK ============ -->
+<div class="ov" id="ovBulk"><div class="sheet">
+  <div class="shead"><div class="stitle" id="bkTitle">一括登録</div>
+    <button class="x" id="bkClose">×</button></div>
+  <div class="sbody">
+
+    <!-- stage 1 -->
+    <div id="bkSetup">
+      <fieldset><legend>写真の並び方</legend>
+        <label class="chk"><input type="radio" name="bkmode" value="single" checked>
+          1枚ずつ ＝ 1カード（表だけ撮る）</label>
+        <label class="chk" style="margin-top:8px"><input type="radio" name="bkmode" value="pair">
+          2枚ずつ ＝ 1カード（表 → 裏 の順で撮る）</label>
+        <p class="note" style="margin-top:9px">
+          表裏を撮る場合は「表・裏・表・裏…」の順に撮影してください。選んだ順にペアにします。<br>
+          シリアルやカード番号は裏面にあることが多いので、精度を求めるならペア推奨です。</p>
+      </fieldset>
+
+      <label class="drop" id="bkDrop" style="aspect-ratio:auto;padding:30px 16px;display:block;text-align:center;cursor:pointer">
+        <b style="font-size:14px;color:var(--fg)">写真をまとめて選ぶ</b><br>
+        <span style="font-size:11.5px">一度に60枚まで</span>
+        <input type="file" accept="image/*" multiple id="bkFiles">
+      </label>
+
+      <div id="bkPreview"></div>
+      <p class="note hide" id="bkNoAi" style="margin-top:12px">
+        AI読み取りが未設定です。このまま進めると<b>写真だけを取り込み</b>、カード情報は後から手入力になります。</p>
+    </div>
+
+    <!-- stage 2 -->
+    <div id="bkProgress" class="hide">
+      <div style="text-align:center;padding:10px 0">
+        <div id="bkNow" style="font-size:15px;font-weight:700"></div>
+        <div class="pbar"><div id="bkBar" style="width:0%"></div></div>
+        <div class="note" id="bkSub"></div>
+      </div>
+      <div id="bkLog" class="note" style="margin-top:14px"></div>
+      <p class="note" style="margin-top:14px">
+        利用上限に当たらないよう、1枚ずつ間隔を空けて読み取ります。<br>
+        <b>この画面を閉じたり、別のアプリに切り替えたりしないでください。</b>途中で止まります。</p>
+    </div>
+
+    <!-- stage 3 -->
+    <div id="bkReview" class="hide">
+      <fieldset><legend>全件に共通で入れる項目（任意）</legend>
+        <div class="row">
+          <div class="f"><label>購入日</label><input type="date" id="bk-pdate"></div>
+          <div class="f"><label>購入元</label><input id="bk-src" placeholder="eBay"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="f"><label>保管場所</label><input id="bk-loc" placeholder="バインダーA"></div>
+          <div class="f"><label>タグ</label><input id="bk-tags" placeholder="2024年購入"></div>
+        </div>
+        <p class="note" style="margin-top:8px">同じ箱・同じ購入分をまとめて入れるときに便利です。空欄なら何も入りません。</p>
+      </fieldset>
+      <p class="note" style="margin:14px 0 4px">
+        赤枠はAIが自信を持てなかった項目です。写真と見比べて直してください。<br>
+        チェックを外した行は登録されません。</p>
+      <div id="bkRows"></div>
+    </div>
+
+  </div>
+  <div class="sfoot">
+    <button class="btn ghost" id="bkBack">閉じる</button>
+    <button class="btn" id="bkNext">読み取りを開始</button>
   </div>
 </div></div>
 
@@ -1159,6 +1251,283 @@ async function testAI(){
 }
 
 /* =========================================================
+   一括登録
+   ========================================================= */
+const BULK_MAX   = 60;     // 1回の上限
+const BULK_PACE  = 4500;   // 1枚ごとの待ち時間(ms)。無料枠のRPM制限を避ける
+const BULK_FIELDS = [
+  ["player","選手名","nm"], ["year","年"], ["brand","メーカー"],
+  ["product","商品名"], ["cardNo","番号"], ["parallel","パラレル"], ["serial","シリアル"]
+];
+
+let bulk = { stage:1, mode:"single", items:[], abort:false, running:false };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function bulkReset(){
+  bulk = { stage:1, mode:"single", items:[], abort:false, running:false };
+  $("#bkFiles").value = "";
+  $("#bkPreview").innerHTML = "";
+  $("#bkRows").innerHTML = "";
+  $("#bkLog").innerHTML = "";
+  $$('input[name="bkmode"]').forEach((r, i) => r.checked = i === 0);
+  ["#bk-pdate","#bk-src","#bk-loc","#bk-tags"].forEach(s => $(s).value = "");
+  bulkStage(1);
+}
+
+function bulkStage(n){
+  bulk.stage = n;
+  $("#bkSetup").classList.toggle("hide", n !== 1);
+  $("#bkProgress").classList.toggle("hide", n !== 2);
+  $("#bkReview").classList.toggle("hide", n !== 3);
+  const aiOn = !!(S.aiProv && S.aiKey);
+  $("#bkNoAi").classList.toggle("hide", aiOn || n !== 1);
+
+  const title = { 1:"一括登録", 2:"読み取り中", 3:"確認して登録" }[n];
+  $("#bkTitle").textContent = title;
+
+  const back = $("#bkBack"), next = $("#bkNext");
+  if(n === 1){
+    back.textContent = "閉じる"; back.classList.remove("hide");
+    next.textContent = aiOn ? "読み取りを開始" : "写真だけ取り込む";
+    next.classList.remove("hide");
+    next.disabled = !bulk.items.length;
+  } else if(n === 2){
+    back.textContent = "中止"; back.classList.remove("hide");
+    next.classList.add("hide");
+  } else {
+    back.textContent = "やめる"; back.classList.remove("hide");
+    next.classList.remove("hide"); next.disabled = false;
+    bulkUpdateSaveLabel();
+  }
+}
+
+function bulkUpdateSaveLabel(){
+  const n = bulk.items.filter(i => i.include).length;
+  $("#bkNext").textContent = n ? `${n} 件を登録` : "登録するものがありません";
+  $("#bkNext").disabled = !n;
+}
+
+/** 選ばれたファイルをカード単位にまとめる */
+async function bulkLoadFiles(files){
+  const list = [...files];
+  if(!list.length) return;
+  bulk.mode = $$('input[name="bkmode"]').find(r => r.checked).value;
+  const per = bulk.mode === "pair" ? 2 : 1;
+
+  if(list.length > BULK_MAX * per){
+    alert(`一度に扱えるのは ${BULK_MAX} カード分までです。\n先頭から ${BULK_MAX} カード分だけ取り込みます。`);
+    list.length = BULK_MAX * per;
+  }
+  if(bulk.mode === "pair" && list.length % 2 !== 0){
+    if(!confirm(`写真が ${list.length} 枚で奇数です。\n最後の1枚は表だけのカードとして扱います。よろしいですか？`)) return;
+  }
+
+  $("#bkDrop").style.opacity = ".5";
+  bulk.items = [];
+  for(let i = 0; i < list.length; i += per){
+    bulk.items.push({
+      id: uid(),
+      files: list.slice(i, i + per),
+      img: { front:null, back:null },
+      data: null, status:"wait", error:"", include:true
+    });
+  }
+  // サムネイルだけ先に作る（本体の圧縮は読み取り時に行う）
+  for(const it of bulk.items){
+    try {
+      const cv = await shrink(it.files[0], 160, 0.7);
+      it.preview = cv.toDataURL("image/jpeg", 0.7);
+    } catch { it.preview = null; }
+  }
+  $("#bkDrop").style.opacity = "";
+
+  $("#bkPreview").innerHTML = `<p class="note" style="margin-top:14px">
+      写真 ${list.length} 枚 → <b style="color:var(--fg)">${bulk.items.length} カード</b>として取り込みます</p>
+    <div class="bkgrid">` + bulk.items.map((it, i) =>
+      `<div class="bkth">${it.preview ? `<img src="${it.preview}">` : ""}
+        <b>${i + 1}</b>${it.files.length > 1 ? `<i>表裏</i>` : ""}</div>`).join("") + `</div>`;
+  bulkStage(1);
+}
+
+async function bulkRun(){
+  const aiOn = !!(S.aiProv && S.aiKey);
+  bulk.abort = false; bulk.running = true;
+  bulkStage(2);
+
+  const model = S.aiModel || AI_MODELS[S.aiProv]?.[0]?.[0];
+  const total = bulk.items.length;
+  let done = 0, ok = 0, ng = 0;
+
+  const log = m => { $("#bkLog").innerHTML = m + "<br>" + $("#bkLog").innerHTML.split("<br>").slice(0, 6).join("<br>"); };
+
+  for(const it of bulk.items){
+    if(bulk.abort) break;
+    done++;
+    $("#bkNow").textContent = `${done} / ${total} 枚目`;
+    $("#bkBar").style.width = `${(done - 1) / total * 100}%`;
+    $("#bkSub").textContent = aiOn ? "画像を準備しています…" : "取り込んでいます…";
+
+    // 圧縮して保存用の画像を作る
+    try{
+      const sides = ["front","back"];
+      for(let s = 0; s < it.files.length; s++){
+        it.img[sides[s]] = await processImage(it.files[s]);
+      }
+    }catch(e){
+      it.status = "err"; it.error = "画像を読み込めませんでした"; it.include = false;
+      ng++; log(`${done}枚目：画像エラー`); continue;
+    }
+
+    if(!aiOn){ it.status = "ok"; it.data = normalizeAI({}); ok++; continue; }
+
+    // AI 読み取り（429 は1度だけ待って再試行）
+    $("#bkSub").textContent = "AIが読み取っています…";
+    let attempt = 0;
+    while(attempt < 2){
+      try{
+        const imgs = [];
+        for(const side of ["front","back"]){
+          const p = it.img[side]; if(!p) continue;
+          let b = p.blob;
+          try { b = await canvasBlob(await shrink(p.file, 2200, 0.92), 0.92) || p.blob; } catch {}
+          imgs.push(await blobToB64(b));
+        }
+        const raw = S.aiProv === "gemini" ? await callGemini(imgs, S.aiKey, model)
+                                          : await callClaude(imgs, S.aiKey, model);
+        it.data = normalizeAI(parseAIJson(raw));
+        it.status = "ok"; ok++;
+        log(`${done}枚目：${esc(it.data.player || "（選手名なし）")}`);
+        break;
+      }catch(e){
+        const m = e.message || "";
+        if(attempt === 0 && /quota|RESOURCE_EXHAUSTED|rate.?limit|429|overloaded/i.test(m)){
+          attempt++;
+          $("#bkSub").textContent = "利用上限のため30秒待っています…";
+          for(let w = 30; w > 0 && !bulk.abort; w--){ $("#bkSub").textContent = `利用上限のため待機中… ${w}秒`; await sleep(1000); }
+          continue;
+        }
+        it.status = "err"; it.error = m.slice(0, 60); it.data = normalizeAI({});
+        ng++; log(`${done}枚目：<span style="color:var(--bad)">失敗</span>`);
+        break;
+      }
+    }
+    $("#bkBar").style.width = `${done / total * 100}%`;
+    if(done < total && aiOn && !bulk.abort) await sleep(BULK_PACE);
+  }
+
+  bulk.running = false;
+  $("#bkBar").style.width = "100%";
+  if(bulk.abort){
+    // 未処理の項目は登録対象から外す
+    bulk.items.forEach(i => { if(i.status === "wait") i.include = false; });
+  }
+  bulk.items = bulk.items.filter(i => i.status !== "wait" || !bulk.abort);
+  bulkRenderReview();
+  bulkStage(3);
+  toast(`読み取り完了：成功 ${ok} 件${ng ? ` / 失敗 ${ng} 件` : ""}`);
+}
+
+function bulkRenderReview(){
+  $("#bkRows").innerHTML = bulk.items.map((it, i) => {
+    const d = it.data || {};
+    const low = new Set(d.lowConfidence || []);
+    const f = ([k, ph, cls]) => `<input data-i="${i}" data-k="${k}" placeholder="${ph}"
+        class="${cls || ""}${low.has(k) ? " shaky" : ""}" value="${esc(d[k] ?? "")}" autocomplete="off">`;
+    return `<div class="bkrow${it.include ? "" : " off"}" data-i="${i}">
+      <img src="${it.preview || ""}" alt="">
+      <div class="bkf">
+        ${f(BULK_FIELDS[0])}
+        <div class="bkg">${f(BULK_FIELDS[1])}${f(BULK_FIELDS[2])}</div>
+        <div class="bkg">${f(BULK_FIELDS[3])}${f(BULK_FIELDS[4])}</div>
+        <div class="bkg">${f(BULK_FIELDS[5])}${f(BULK_FIELDS[6])}</div>
+        ${it.error ? `<div class="bkerr">${esc(it.error)}</div>` : ""}
+      </div>
+      <div class="bkchk"><input type="checkbox" data-inc="${i}" ${it.include ? "checked" : ""}></div>
+    </div>`;
+  }).join("");
+
+  $("#bkRows").oninput = e => {
+    const el = e.target;
+    if(el.dataset.k){
+      bulk.items[+el.dataset.i].data[el.dataset.k] = el.value;
+      el.classList.remove("shaky");
+    }
+  };
+  $("#bkRows").onchange = e => {
+    const el = e.target;
+    if(el.dataset.inc !== undefined){
+      const i = +el.dataset.inc;
+      bulk.items[i].include = el.checked;
+      $(`.bkrow[data-i="${i}"]`).classList.toggle("off", !el.checked);
+      bulkUpdateSaveLabel();
+    }
+  };
+  bulkUpdateSaveLabel();
+}
+
+async function bulkSave(){
+  const targets = bulk.items.filter(i => i.include);
+  if(!targets.length) return;
+
+  const common = {
+    purchaseDate:   $("#bk-pdate").value,
+    purchaseSource: $("#bk-src").value.trim(),
+    location:       $("#bk-loc").value.trim(),
+    tags:           $("#bk-tags").value.split(",").map(s => s.trim()).filter(Boolean)
+  };
+
+  $("#bkNext").disabled = true;
+  $("#bkNext").innerHTML = `<i class="spin"></i>登録中…`;
+
+  const now = Date.now();
+  let n = 0;
+  for(const it of targets){
+    const d = it.data || {};
+    const id = uid();
+    const c = {
+      id, createdAt: now + n, updatedAt: now,
+      player: String(d.player || "").trim(),
+      team: String(d.team || "").trim(), nationality: String(d.nationality || "").trim(),
+      brand: String(d.brand || "").trim(), product: String(d.product || "").trim(),
+      year: String(d.year || "").trim(), cardNo: String(d.cardNo || "").trim(),
+      parallel: String(d.parallel || "").trim(), serial: String(d.serial || "").trim(),
+      isRookie: !!d.isRookie, isAuto: !!d.isAuto, isMem: !!d.isMem, isSold: false,
+      gradeCompany: ["PSA","BGS","SGC","CGC","HGA"].includes(d.gradeCompany) ? d.gradeCompany : "",
+      grade: String(d.grade || "").trim(), cert: "",
+      purchaseDate: common.purchaseDate, quantity: 1,
+      purchasePrice: null, purchaseCurrency: "JPY",
+      purchaseSource: common.purchaseSource, location: common.location,
+      marketPrice: null, marketCurrency: "JPY", marketUpdatedAt: null, priceHistory: [],
+      tags: common.tags.slice(), memo: "",
+      thumb: it.img.front?.thumb || null
+    };
+    for(const side of ["front","back"]){
+      const p = it.img[side];
+      if(p) await dbPut("images", { key:`${id}:${side}`, cardId:id, side, blob:p.blob });
+    }
+    await dbPut("cards", c);
+    cards.unshift(c);
+    n++;
+  }
+
+  cards.sort((a, b) => b.createdAt - a.createdAt);
+  closeAll(); bulkReset();
+  refreshOptions(); limit = 60; renderList();
+  toast(`${n} 件を登録しました`);
+}
+
+function bulkClose(){
+  if(bulk.running){
+    if(!confirm("読み取りを中止しますか？")) return;
+    bulk.abort = true; return;
+  }
+  if(bulk.stage === 3 && bulk.items.some(i => i.include)){
+    if(!confirm("登録せずに閉じます。読み取った内容は失われます。よろしいですか？")) return;
+  }
+  closeAll(); bulkReset();
+}
+
+/* =========================================================
    Detail
    ========================================================= */
 function marketLinks(c){
@@ -1328,7 +1697,12 @@ function bind(){
   $("#vEdit").onclick = () => { const c = cards.find(x => x.id === viewingId);
     $("#ovView").classList.remove("on"); openEditor(c); };
   $$("[data-close]").forEach(b => b.onclick = closeAll);
-  $$(".ov").forEach(o => o.onclick = e => { if(e.target === o) closeAll(); });
+  // 背景タップで閉じる。一括登録は作業中の取りこぼしを防ぐため対象外
+  $$(".ov").forEach(o => o.onclick = e => {
+    if(e.target !== o) return;
+    if(o.id === "ovBulk") return bulkClose();
+    closeAll();
+  });
 
   // 画像選択
   const hook = (input, side) => $(input).onchange = async e => {
@@ -1341,6 +1715,20 @@ function bind(){
     } catch { toast("この画像は読み込めませんでした"); }
   };
   hook("#fFront", "front"); hook("#fBack", "back");
+
+  // 一括登録
+  $("#btnBulk").onclick = () => {
+    bulkReset();
+    $("#ovBulk").classList.add("on");
+    document.body.style.overflow = "hidden";
+  };
+  $("#bkFiles").onchange = e => bulkLoadFiles(e.target.files);
+  $("#bkClose").onclick  = bulkClose;
+  $("#bkBack").onclick   = bulkClose;
+  $("#bkNext").onclick   = () => bulk.stage === 1 ? bulkRun() : bulkSave();
+  $$('input[name="bkmode"]').forEach(r => r.onchange = () => {
+    if(bulk.items.length){ bulk.items = []; $("#bkPreview").innerHTML = ""; $("#bkFiles").value = ""; bulkStage(1); }
+  });
 
   // AI 読み取り
   $("#aiRun").onclick    = runAI;
