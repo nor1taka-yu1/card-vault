@@ -176,6 +176,19 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
   font-size:9px;font-style:normal;font-weight:700;padding:1px 4px;border-radius:4px}
 .bkth b{position:absolute;right:2px;top:2px;background:rgba(0,0,0,.75);color:#fff;
   font-size:11px;width:17px;height:17px;line-height:17px;text-align:center;border-radius:50%}
+.bkth .del{position:absolute;right:0;bottom:0;background:rgba(245,82,92,.9);border:0;color:#fff;
+  font-size:11px;line-height:1;padding:4px 6px;border-radius:6px 0 0 0}
+.bkth.pend{outline:2px solid var(--warn);outline-offset:-2px}
+.shotbtn{position:relative;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:16px 8px;background:linear-gradient(135deg,#2d6fbf,#4ea1ff);color:#fff;
+  border-radius:var(--r);font-size:13.5px;font-weight:700;cursor:pointer}
+.shotbtn.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--fg);font-weight:600}
+.shotbtn input{position:absolute;inset:0;opacity:0;width:100%;height:100%}
+.shotbtn:active{opacity:.75}
+.nextshot{padding:12px;border-radius:var(--r);background:var(--panel2);
+  border:1px solid var(--line);text-align:center;font-size:13px;line-height:1.6}
+.nextshot b{color:var(--accent);font-size:15px}
+.nextshot.back b{color:var(--warn)}
 .pbar{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:10px 0}
 .pbar div{height:100%;background:var(--accent);transition:width .3s}
 .bkrow{display:flex;gap:9px;padding:11px 0;border-bottom:1px solid var(--line)}
@@ -457,11 +470,21 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
           シリアルやカード番号は裏面にあることが多いので、精度を求めるならペア推奨です。</p>
       </fieldset>
 
-      <label class="drop" id="bkDrop" style="aspect-ratio:auto;padding:30px 16px;display:block;text-align:center;cursor:pointer">
-        <b style="font-size:14px;color:var(--fg)">写真をまとめて選ぶ</b><br>
-        <span style="font-size:11.5px">一度に60枚まで</span>
-        <input type="file" accept="image/*" multiple id="bkFiles">
-      </label>
+      <div class="nextshot" id="bkNextShot"></div>
+
+      <div class="row" style="margin-top:10px">
+        <label class="shotbtn" id="bkShootWrap">
+          <span id="bkShootLabel">📷 撮影する</span>
+          <input type="file" accept="image/*" capture="environment" id="bkShoot">
+        </label>
+        <label class="shotbtn ghost">
+          <span>🖼 ライブラリから選ぶ</span>
+          <input type="file" accept="image/*" multiple id="bkFiles">
+        </label>
+      </div>
+      <p class="note" style="margin-top:8px">
+        撮影は<b>1枚ずつ追加</b>されます。撮り終えるまで何度でも押してください。<br>
+        全部撮り終えたら、下の「読み取りを開始」を押します。</p>
 
       <div id="bkPreview"></div>
       <p class="note hide" id="bkNoAi" style="margin-top:12px">
@@ -1260,18 +1283,113 @@ const BULK_FIELDS = [
   ["product","商品名"], ["cardNo","番号"], ["parallel","パラレル"], ["serial","シリアル"]
 ];
 
-let bulk = { stage:1, mode:"single", items:[], abort:false, running:false };
+/** shots は撮影／選択した写真を撮った順に貯める。撮るたびに追加され、置き換わらない。 */
+let bulk = { stage:1, mode:"single", shots:[], items:[], abort:false, running:false };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function bulkReset(){
-  bulk = { stage:1, mode:"single", items:[], abort:false, running:false };
-  $("#bkFiles").value = "";
+  bulk = { stage:1, mode:"single", shots:[], items:[], abort:false, running:false };
+  $("#bkFiles").value = ""; $("#bkShoot").value = "";
   $("#bkPreview").innerHTML = "";
   $("#bkRows").innerHTML = "";
   $("#bkLog").innerHTML = "";
   $$('input[name="bkmode"]').forEach((r, i) => r.checked = i === 0);
   ["#bk-pdate","#bk-src","#bk-loc","#bk-tags"].forEach(s => $(s).value = "");
+  bulkRenderShots();
   bulkStage(1);
+}
+
+const bulkMode = () => ($$('input[name="bkmode"]').find(r => r.checked) || {}).value || "single";
+
+/** 写真を末尾に追加する（既存分は保持する） */
+async function bulkAddShots(files){
+  const list = [...files];
+  if(!list.length) return;
+
+  const per = bulkMode() === "pair" ? 2 : 1;
+  const room = BULK_MAX * per - bulk.shots.length;
+  if(room <= 0){
+    alert(`一度に扱えるのは ${BULK_MAX} カード分までです。\nいったん登録してから、続きを取り込んでください。`);
+    return;
+  }
+  if(list.length > room){
+    alert(`残り ${room} 枚まで追加できます。先頭から ${room} 枚を追加します。`);
+    list.length = room;
+  }
+
+  for(const file of list){
+    let preview = null;
+    try { preview = (await shrink(file, 160, 0.7)).toDataURL("image/jpeg", 0.7); } catch {}
+    bulk.shots.push({ file, preview });
+  }
+  bulkRenderShots();
+}
+
+function bulkRemoveShot(i){
+  bulk.shots.splice(i, 1);
+  bulkRenderShots();
+}
+
+/** 撮影ガイドとサムネイル一覧を描き直す */
+function bulkRenderShots(){
+  const pair = bulkMode() === "pair";
+  const n = bulk.shots.length;
+  const cards = pair ? Math.ceil(n / 2) : n;
+  const needBack = pair && n % 2 === 1;   // 表だけ撮って裏待ちの状態
+
+  // 次に撮るもの
+  const nextCard = pair ? (needBack ? Math.ceil(n / 2) : n / 2 + 1) : n + 1;
+  const guide = $("#bkNextShot");
+  guide.classList.toggle("back", needBack);
+  guide.innerHTML = needBack
+    ? `次に撮るのは<br><b>${nextCard} 枚目のカードの【裏面】</b>`
+    : `次に撮るのは<br><b>${nextCard} 枚目のカードの【${pair ? "表面" : "写真"}】</b>`;
+  $("#bkShootLabel").textContent = needBack ? "📷 裏面を撮影" : (pair ? "📷 表面を撮影" : "📷 撮影する");
+
+  // 一覧
+  $("#bkPreview").innerHTML = !n ? "" :
+    `<p class="note" style="margin-top:14px">
+       写真 ${n} 枚 → <b style="color:var(--fg)">${cards} カード</b>
+       ${needBack ? `<span style="color:var(--warn)"> ／ 最後の1枚は裏面待ちです</span>` : ""}</p>
+     <div class="bkgrid">` + bulk.shots.map((s, i) => {
+        const ci = pair ? Math.floor(i / 2) + 1 : i + 1;
+        const side = pair ? (i % 2 === 0 ? "表" : "裏") : "";
+        const pending = pair && needBack && i === n - 1;
+        return `<div class="bkth${pending ? " pend" : ""}">
+          ${s.preview ? `<img src="${s.preview}">` : ""}
+          <b>${ci}</b>${side ? `<i>${side}</i>` : ""}
+          <button class="del" data-del="${i}" type="button">削除</button></div>`;
+      }).join("") + `</div>`;
+
+  bulkStage(1);
+}
+
+/** shots をカード単位にまとめる。奇数のときだけ確認する。 */
+function bulkGroupShots(){
+  const pair = bulkMode() === "pair";
+  const per = pair ? 2 : 1;
+  const n = bulk.shots.length;
+
+  if(pair && n % 2 !== 0){
+    const ok = confirm(
+      `写真が ${n} 枚で奇数です。\n\n` +
+      `最後の1枚（${Math.ceil(n / 2)}枚目のカード）は、裏面がないまま登録されます。\n\n` +
+      `・裏面をこれから撮る場合は「キャンセル」\n` +
+      `・表だけで進める場合は「OK」`);
+    if(!ok) return null;
+  }
+
+  const items = [];
+  for(let i = 0; i < n; i += per){
+    items.push({
+      id: uid(),
+      files: bulk.shots.slice(i, i + per).map(s => s.file),
+      preview: bulk.shots[i].preview,
+      img: { front:null, back:null },
+      data: null, status:"wait", error:"", include:true
+    });
+  }
+  return items;
 }
 
 function bulkStage(n){
@@ -1288,9 +1406,12 @@ function bulkStage(n){
   const back = $("#bkBack"), next = $("#bkNext");
   if(n === 1){
     back.textContent = "閉じる"; back.classList.remove("hide");
-    next.textContent = aiOn ? "読み取りを開始" : "写真だけ取り込む";
+    const cards = bulkMode() === "pair" ? Math.ceil(bulk.shots.length / 2) : bulk.shots.length;
+    next.textContent = !cards ? "写真を追加してください"
+                     : aiOn  ? `${cards} カードを読み取る`
+                             : `${cards} カードを取り込む`;
     next.classList.remove("hide");
-    next.disabled = !bulk.items.length;
+    next.disabled = !cards;
   } else if(n === 2){
     back.textContent = "中止"; back.classList.remove("hide");
     next.classList.add("hide");
@@ -1307,49 +1428,12 @@ function bulkUpdateSaveLabel(){
   $("#bkNext").disabled = !n;
 }
 
-/** 選ばれたファイルをカード単位にまとめる */
-async function bulkLoadFiles(files){
-  const list = [...files];
-  if(!list.length) return;
-  bulk.mode = $$('input[name="bkmode"]').find(r => r.checked).value;
-  const per = bulk.mode === "pair" ? 2 : 1;
-
-  if(list.length > BULK_MAX * per){
-    alert(`一度に扱えるのは ${BULK_MAX} カード分までです。\n先頭から ${BULK_MAX} カード分だけ取り込みます。`);
-    list.length = BULK_MAX * per;
-  }
-  if(bulk.mode === "pair" && list.length % 2 !== 0){
-    if(!confirm(`写真が ${list.length} 枚で奇数です。\n最後の1枚は表だけのカードとして扱います。よろしいですか？`)) return;
-  }
-
-  $("#bkDrop").style.opacity = ".5";
-  bulk.items = [];
-  for(let i = 0; i < list.length; i += per){
-    bulk.items.push({
-      id: uid(),
-      files: list.slice(i, i + per),
-      img: { front:null, back:null },
-      data: null, status:"wait", error:"", include:true
-    });
-  }
-  // サムネイルだけ先に作る（本体の圧縮は読み取り時に行う）
-  for(const it of bulk.items){
-    try {
-      const cv = await shrink(it.files[0], 160, 0.7);
-      it.preview = cv.toDataURL("image/jpeg", 0.7);
-    } catch { it.preview = null; }
-  }
-  $("#bkDrop").style.opacity = "";
-
-  $("#bkPreview").innerHTML = `<p class="note" style="margin-top:14px">
-      写真 ${list.length} 枚 → <b style="color:var(--fg)">${bulk.items.length} カード</b>として取り込みます</p>
-    <div class="bkgrid">` + bulk.items.map((it, i) =>
-      `<div class="bkth">${it.preview ? `<img src="${it.preview}">` : ""}
-        <b>${i + 1}</b>${it.files.length > 1 ? `<i>表裏</i>` : ""}</div>`).join("") + `</div>`;
-  bulkStage(1);
-}
-
 async function bulkRun(){
+  const items = bulkGroupShots();
+  if(!items) return;          // 裏面を撮り直すため中断
+  bulk.items = items;
+  bulk.mode = bulkMode();
+
   const aiOn = !!(S.aiProv && S.aiKey);
   bulk.abort = false; bulk.running = true;
   bulkStage(2);
@@ -1523,6 +1607,9 @@ function bulkClose(){
   }
   if(bulk.stage === 3 && bulk.items.some(i => i.include)){
     if(!confirm("登録せずに閉じます。読み取った内容は失われます。よろしいですか？")) return;
+  }
+  if(bulk.stage === 1 && bulk.shots.length){
+    if(!confirm(`撮影した ${bulk.shots.length} 枚を破棄して閉じます。よろしいですか？`)) return;
   }
   closeAll(); bulkReset();
 }
@@ -1722,13 +1809,24 @@ function bind(){
     $("#ovBulk").classList.add("on");
     document.body.style.overflow = "hidden";
   };
-  $("#bkFiles").onchange = e => bulkLoadFiles(e.target.files);
-  $("#bkClose").onclick  = bulkClose;
-  $("#bkBack").onclick   = bulkClose;
-  $("#bkNext").onclick   = () => bulk.stage === 1 ? bulkRun() : bulkSave();
-  $$('input[name="bkmode"]').forEach(r => r.onchange = () => {
-    if(bulk.items.length){ bulk.items = []; $("#bkPreview").innerHTML = ""; $("#bkFiles").value = ""; bulkStage(1); }
-  });
+  // 撮影・選択はどちらも「末尾に追加」。value を空に戻して同じ写真でも再発火させる
+  const addShots = async e => {
+    const files = e.target.files;
+    e.target.value = "";
+    await bulkAddShots(files);
+  };
+  $("#bkShoot").onchange = addShots;
+  $("#bkFiles").onchange = addShots;
+
+  $("#bkPreview").onclick = e => {
+    const d = e.target.dataset?.del;
+    if(d !== undefined) bulkRemoveShot(+d);
+  };
+  $("#bkClose").onclick = bulkClose;
+  $("#bkBack").onclick  = bulkClose;
+  $("#bkNext").onclick  = () => bulk.stage === 1 ? bulkRun() : bulkSave();
+  // 並び方を変えても撮った写真は保持し、組み直すだけ
+  $$('input[name="bkmode"]').forEach(r => r.onchange = bulkRenderShots);
 
   // AI 読み取り
   $("#aiRun").onclick    = runAI;
