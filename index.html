@@ -370,6 +370,13 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
         <button class="btn" id="gdSync">今すぐ同期</button>
         <button class="btn ghost" id="gdRestore">クラウドから復元</button>
       </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn ghost" id="gdDiag">同期の診断</button>
+        <button class="btn ghost" id="gdResend">写真をすべて再送信</button>
+      </div>
+      <p class="note" style="margin-top:8px">
+        写真が Drive に上がっているか不安なときは「同期の診断」で数を突き合わせできます。
+        不足していれば「写真をすべて再送信」で補えます。</p>
       <button class="btn ghost" id="gdOffBtn" style="width:100%;margin-top:10px">同期を解除</button>
       <p class="note" style="margin-top:10px">
         「クラウドから復元」は、機種変更したときや、この端末のデータが消えたときに使います。
@@ -683,6 +690,8 @@ const dbGet    = (s, k)   => req(tx(s, "readonly").get(k));
 const dbPut    = (s, v)   => req(tx(s, "readwrite").put(v));
 const dbDel    = (s, k)   => req(tx(s, "readwrite").delete(k));
 const dbClear  = s        => req(tx(s, "readwrite").clear());
+const dbKeys   = s        => req(tx(s, "readonly").getAllKeys());
+const dbCount  = s        => req(tx(s, "readonly").count());
 
 /* =========================================================
    State
@@ -2217,6 +2226,34 @@ async function driveUpload(name, blob, fileId, parent){
   return j.id;
 }
 
+/** フォルダの中身を1回読んで、ファイル名 → ID の対応を作り直す。
+ *  ローカルの記録が壊れていても Drive の実態に合わせ直せるので、
+ *  「同じファイルが増殖する」「更新先を見失う」を根本的に防ぐ。 */
+async function driveIndex(parent){
+  const q = encodeURIComponent(`'${parent}' in parents and trashed=false`);
+  const j = await djson(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=1000`);
+  const files = j.files || [];
+
+  const map = {};
+  for(const f of files){
+    const m = f.name.match(/^img_(.+)_(front|back)\.jpg$/);
+    if(m) map[`${m[1]}:${m[2]}`] = f.id;
+  }
+  S.gdImgMap = map;
+
+  // カード情報ファイルは最新の1つだけ残し、増えてしまった分は片づける
+  const metas = files.filter(f => f.name === DRIVE_META)
+                     .sort((a, b) => String(b.modifiedTime || "").localeCompare(String(a.modifiedTime || "")));
+  if(metas.length){
+    S.gdMetaFile = metas[0].id;
+    for(const dup of metas.slice(1)) await driveDelete(dup.id);
+  }else{
+    S.gdMetaFile = "";
+  }
+  return { files, imgCount:Object.keys(map).length, dupRemoved: Math.max(0, metas.length - 1) };
+}
+
 async function driveDelete(fileId){
   try { await dreq(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method:"DELETE" }); }
   catch(e){ console.warn("削除できませんでした", e); }
@@ -2244,23 +2281,43 @@ async function syncPush(manual){
   try{
     const parent = await driveFolder();
 
-    // 1. 変更のあった写真だけ送る
+    // 0. Drive の実態を読み直す（更新先の取り違えと重複作成を防ぐ）
+    syncBadge("⟳ 確認中");
+    await driveIndex(parent);
     const map = S.gdImgMap;
-    const pend = S.gdPendImg;
-    let n = 0;
-    for(const key of pend){
+
+    // 1. 写真を送る
+    //    送信待ちリストではなく「端末にある写真」と「Driveにある写真」を突き合わせ、
+    //    Drive に無いものを必ず送る。リストが壊れていても取りこぼさない。
+    const localKeys = (await dbKeys("images")).map(String);
+    const pend = new Set(S.gdPendImg);
+    const todo = localKeys.filter(k => !map[k] || pend.has(k));
+
+    let n = 0, failed = 0;
+    for(const key of todo){
       const rec = await dbGet("images", key);
-      if(!rec){                       // 削除された写真
-        if(map[key]){ await driveDelete(map[key]); delete map[key]; }
-      }else{
-        const [cid, side] = key.split(":");
-        const id = await driveUpload(`img_${cid}_${side}.jpg`, rec.blob, map[key], parent);
-        map[key] = id;
+      if(!rec){ n++; continue; }
+      const [cid, side] = key.split(":");
+      try{
+        map[key] = await driveUpload(`img_${cid}_${side}.jpg`, rec.blob, map[key], parent);
+      }catch(err){
+        console.warn("写真の送信に失敗", key, err);
+        failed++;
       }
       n++;
-      syncBadge(`⟳ 写真 ${n}/${pend.length}`);
+      syncBadge(`⟳ 写真 ${n}/${todo.length}`);
       S.gdImgMap = map;
-      S.gdPendImg = pend.slice(n);
+    }
+    S.gdImgMap = map;
+
+    // Drive にあって端末に無い写真は、カードごと消えている場合だけ掃除する
+    for(const key of Object.keys(map)){
+      if(localKeys.includes(key)) continue;
+      const cid = key.split(":")[0];
+      if(!cards.some(c => c.id === cid)){
+        await driveDelete(map[key]);
+        delete map[key];
+      }
     }
     S.gdImgMap = map;
     S.gdPendImg = [];
@@ -2274,8 +2331,9 @@ async function syncPush(manual){
     S.gdMetaFile = await driveUpload(DRIVE_META, blob, S.gdMetaFile, parent);
 
     S.gdDirty = false; S.gdLast = Date.now();
-    syncState = "idle"; syncBadge();
-    if(manual) toast("Google Drive に保存しました");
+    syncState = failed ? "error" : "idle"; syncBadge();
+    if(failed) alert(`写真 ${failed} 枚の送信に失敗しました。\nもう一度「今すぐ同期」を押すと再試行します。`);
+    else if(manual) toast(`Google Drive に保存しました（写真 ${Object.keys(map).length} 枚）`);
   }catch(e){
     console.error(e);
     if(e.code === "NEEDS_AUTH"){
@@ -2329,13 +2387,16 @@ async function syncRestore(){
 
     // カード情報を戻し、サムネイルを作り直す
     i = 0;
+    let noImage = 0, thumbFail = 0;
     for(const c of meta.cards){
       i++;
       btn.innerHTML = `<i class="spin"></i>カード ${i}/${meta.cards.length}`;
       let thumb = null;
       const rec = await dbGet("images", `${c.id}:front`);
-      if(rec){
-        try { thumb = (await shrink(rec.blob, 340, 0.72)).toDataURL("image/jpeg", 0.72); } catch {}
+      if(!rec) noImage++;
+      else {
+        try { thumb = (await shrink(rec.blob, 340, 0.72)).toDataURL("image/jpeg", 0.72); }
+        catch { thumbFail++; }
       }
       await dbPut("cards", { ...c, thumb });
     }
@@ -2347,7 +2408,14 @@ async function syncRestore(){
     S.gdDirty = false; S.gdLast = Date.now();
     syncState = "idle"; syncBadge();
     refreshOptions(); limit = 60; renderList();
-    alert(`${meta.cards.length} 枚を復元しました。`);
+    alert(
+      `復元しました。\n\n` +
+      `　カード ${meta.cards.length} 枚\n` +
+      `　写真 ${imgFiles.length} 枚\n` +
+      (noImage ? `\n⚠ 写真が見つからないカードが ${noImage} 枚あります。\n` +
+                 `元の端末で「同期の診断」→「写真をすべて再送信」を実行してから、\n` +
+                 `もう一度この端末で復元してください。\n` : "") +
+      (thumbFail ? `\n⚠ ${thumbFail} 枚は写真の読み込みに失敗しました。\n` : ""));
   }catch(e){
     console.error(e);
     alert("復元できませんでした\n\n" + (e.message || ""));
@@ -2355,6 +2423,70 @@ async function syncRestore(){
     btn.disabled = false; btn.textContent = "クラウドから復元";
     renderSettingsSync();
   }
+}
+
+/** Drive と端末の中身を突き合わせて報告する */
+async function syncDiagnose(){
+  const btn = $("#gdDiag");
+  btn.disabled = true; btn.innerHTML = `<i class="spin"></i>確認中…`;
+  try{
+    const parent = await driveFolder();
+    const q = encodeURIComponent(`'${parent}' in parents and trashed=false`);
+    const list = await djson(
+      `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size)&pageSize=1000`);
+    const files = list.files || [];
+    const imgs  = files.filter(f => f.name.startsWith("img_"));
+    const meta  = files.find(f => f.name === DRIVE_META);
+    const bytes = imgs.reduce((s, f) => s + (+f.size || 0), 0);
+
+    const localCards = await dbCount("cards");
+    const localKeys  = (await dbKeys("images")).map(String);
+    const metaDup = files.filter(f => f.name === DRIVE_META).length;
+
+    // 名前の対応が取れているかを実際のキーで確かめる
+    const driveKeys = new Set(imgs.map(f => {
+      const m = f.name.match(/^img_(.+)_(front|back)\.jpg$/);
+      return m ? `${m[1]}:${m[2]}` : null;
+    }).filter(Boolean));
+    const notOnDrive = localKeys.filter(k => !driveKeys.has(k));
+
+    let verdict;
+    if(!imgs.length && localKeys.length)
+      verdict = "⚠ Drive に写真が1枚もありません。\n「写真をすべて再送信」を押してください。";
+    else if(notOnDrive.length)
+      verdict = `⚠ Drive に無い写真が ${notOnDrive.length} 枚あります。\n「写真をすべて再送信」で補えます。`;
+    else
+      verdict = "✓ 端末の写真はすべて Drive にあります。";
+
+    alert(
+      "【この端末】\n" +
+      `　カード ${localCards} 枚 ／ 写真 ${localKeys.length} 枚\n` +
+      `　例：${localKeys.slice(0, 2).join(" , ") || "なし"}\n\n` +
+      "【Google Drive】\n" +
+      `　カード情報ファイル：${meta ? `あり${metaDup > 1 ? `（重複 ${metaDup} 個 → 次回同期で整理されます）` : ""}` : "なし"}\n` +
+      `　写真 ${imgs.length} 枚（${(bytes / 1048576).toFixed(1)} MB）\n` +
+      `　例：${imgs.slice(0, 2).map(f => f.name).join(" , ") || "なし"}\n` +
+      `　全ファイル ${files.length} 個\n\n` +
+      verdict);
+  }catch(e){
+    alert("確認できませんでした\n\n" + (e.message || ""));
+  }finally{
+    btn.disabled = false; btn.textContent = "同期の診断";
+    renderSettingsSync();
+  }
+}
+
+/** 端末にある写真をすべて送信待ちに積み直す（取りこぼしの修復用） */
+async function syncResendImages(){
+  const keys = (await dbKeys("images")).map(String);
+  if(!keys.length){ toast("この端末に写真がありません"); return; }
+  if(!confirm(`${keys.length} 枚の写真を Google Drive に送り直します。\n\n` +
+              `既に Drive にあるものは上書きされます。\n` +
+              `${Math.ceil(keys.length * 3 / 60)} 分ほどかかる見込みです。\n\n続けますか？`)) return;
+  S.gdPendImg = keys;
+  S.gdDirty = true;
+  renderSettingsSync();
+  await syncPush(true);
 }
 
 /** タップ直後に同期的に呼ばれる必要があるため async にしない */
@@ -2604,6 +2736,8 @@ function bind(){
   $("#gdConnect").onclick = syncConnect;
   $("#gdSync").onclick    = withAuth(() => syncPush(true));
   $("#gdRestore").onclick = withAuth(syncRestore);
+  $("#gdDiag").onclick    = withAuth(syncDiagnose);
+  $("#gdResend").onclick  = withAuth(syncResendImages);
   $("#gdOffBtn").onclick  = syncDisconnect;
   // ヘッダーのバッジからも再認証できるようにする
   $("#syncBadge").onclick = withAuth(() => syncPush(true));
