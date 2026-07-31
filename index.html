@@ -435,6 +435,15 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
     </p>
   </fieldset>
 
+  <fieldset style="margin-top:14px"><legend>データの整理</legend>
+    <button class="btn ghost" id="fixNames" style="width:100%">選手名・チーム名の表記を統一</button>
+    <p class="note" style="margin-top:8px">
+      カードの印字は <code>LAMINE YAMAL</code> だったり <code>Lamine Yamal</code> だったりします。
+      同一人物と判定できるものを、最も多く使われている表記にまとめます。<br>
+      統計の集計自体は表記の違いを無視して行うので急ぎではありませんが、
+      一覧の見た目を揃えたいときに使ってください。</p>
+  </fieldset>
+
   <fieldset style="margin-top:14px"><legend>為替レート</legend>
     <div class="row">
       <div class="f"><label>1 USD = ? 円</label><input type="number" id="rate" step="0.1"></div>
@@ -483,9 +492,9 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 
     <fieldset><legend>選手</legend>
       <div class="row one"><div class="f"><label>選手名 ※必須</label>
-        <input id="e-player" placeholder="Lamine Yamal" autocomplete="off"></div></div>
+        <input id="e-player" list="dl-player" placeholder="Lamine Yamal" autocomplete="off"></div></div>
       <div class="row" style="margin-top:10px">
-        <div class="f"><label>クラブ / 代表</label><input id="e-team" placeholder="FC Barcelona" autocomplete="off"></div>
+        <div class="f"><label>クラブ / 代表</label><input id="e-team" list="dl-team" placeholder="FC Barcelona" autocomplete="off"></div>
         <div class="f"><label>国籍</label><input id="e-nat" placeholder="Spain" autocomplete="off"></div>
       </div>
     </fieldset>
@@ -651,6 +660,8 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
   </div>
 </div></div>
 
+<datalist id="dl-player"></datalist>
+<datalist id="dl-team"></datalist>
 <datalist id="dl-brand"></datalist>
 <datalist id="dl-product"></datalist>
 <datalist id="dl-year"></datalist>
@@ -761,6 +772,36 @@ function toast(msg){
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), 2200);
 }
 
+/* --- 名前の表記ゆれ対策 ------------------------------------------------------
+   カードの印字は "LAMINE YAMAL" だったり "Lamine Yamal" だったりする。
+   表示は読みやすい形に整え、集計は違いを無視する照合キーで行う。
+   ---------------------------------------------------------------------------- */
+
+/** 集計・照合用のキー。大文字小文字・アクセント・記号・空白の差を吸収する */
+function nameKey(s){
+  return String(s ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")   // é → e
+    .toUpperCase()
+    .replace(/[.'’`\-_,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 表示用の整形。ラテン文字だけを対象にし、日本語などは触らない */
+function tidyName(s){
+  const t = String(s ?? "").trim().replace(/\s+/g, " ");
+  if(!/[A-Za-z]/.test(t)) return t;                     // 漢字・かな等はそのまま
+  return t
+    .replace(/[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’]*/g, w => {
+      // FC / AC / PSG / BBM のような短い略称はそのまま残す
+      if(w.length <= 3 && w === w.toUpperCase()) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .replace(/\bMc([a-z])/g,  (_, c) => "Mc" + c.toUpperCase())   // Mctominay → McTominay
+    .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase())
+    .replace(/\bO['’]([a-z])/g, (_, c) => "O'" + c.toUpperCase()); // O'riley → O'Riley
+}
+
 /** カード名の組み立て（検索クエリにも使う） */
 function cardTitle(c){
   return [c.year, c.brand, c.product, c.parallel, c.player, c.cardNo]
@@ -851,17 +892,21 @@ function visibleCards(){
   return out.sort(cmp);
 }
 
+/** グループ化のキーと見出しを返す。キーは表記ゆれを吸収した形にする。 */
 function groupKeys(c, mode){
+  const one = (label, key) => [{ k: key ?? nameKey(label), label }];
   switch(mode){
-    case "player":  return [c.player || "（未入力）"];
-    case "year":    return [c.year || "（年不明）"];
-    case "brand":   return [c.brand || "（メーカー不明）"];
-    case "product": return [[c.brand, c.product].filter(Boolean).join(" ") || "（商品不明）"];
-    case "team":    return [c.team || "（チーム不明）"];
-    case "grade":   return [gradeLabel(c)];
-    case "tag":     return (c.tags || []).length ? c.tags : ["（タグなし）"];
+    case "player":  return one(tidyName(c.player) || "（未入力）");
+    case "team":    return one(tidyName(c.team)   || "（チーム不明）");
+    case "year":    return one(c.year   || "（年不明）");
+    case "brand":   return one(c.brand  || "（メーカー不明）");
+    case "product": return one([c.brand, c.product].filter(Boolean).join(" ") || "（商品不明）");
+    case "grade":   return one(gradeLabel(c));
+    case "tag":     return (c.tags || []).length
+                      ? c.tags.map(t => ({ k:"tag:" + nameKey(t), label:t }))
+                      : [{ k:"tag:", label:"（タグなし）" }];
   }
-  return [""];
+  return [{ k:"", label:"" }];
 }
 
 /* =========================================================
@@ -946,14 +991,18 @@ function renderList(){
     if(list.length > limit) html += `<button class="more" id="more">さらに表示（残り ${list.length - limit} 枚）</button>`;
   } else {
     const g = new Map();
-    list.forEach(c => groupKeys(c, mode).forEach(k => { if(!g.has(k)) g.set(k, []); g.get(k).push(c); }));
-    const groups = [...g.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "ja"));
-    html = groups.map(([name, arr]) => {
-      const qty = arr.reduce((s, c) => s + (c.quantity || 1), 0);
-      const mkt = arr.reduce((s, c) => s + marketJPY(c) * (c.quantity || 1), 0);
-      return `<div class="ghead"><div class="gname">${esc(name)}</div>
+    list.forEach(c => groupKeys(c, mode).forEach(({ k, label }) => {
+      if(!g.has(k)) g.set(k, { label, items:[] });
+      g.get(k).items.push(c);
+    }));
+    const groups = [...g.values()]
+      .sort((a, b) => b.items.length - a.items.length || a.label.localeCompare(b.label, "ja"));
+    html = groups.map(({ label, items }) => {
+      const qty = items.reduce((s, c) => s + (c.quantity || 1), 0);
+      const mkt = items.reduce((s, c) => s + marketJPY(c) * (c.quantity || 1), 0);
+      return `<div class="ghead"><div class="gname">${esc(label)}</div>
         <div class="gsub">${qty} 枚${mkt ? " ・ " + yen(mkt) : ""}</div></div>
-        ${wrapCards(arr)}`;
+        ${wrapCards(items)}`;
     }).join("");
   }
   el.innerHTML = html;
@@ -976,6 +1025,9 @@ function refreshOptions(){
   fill($("#f-tag"),   [...new Set(cards.flatMap(c => c.tags || []))].sort());
 
   const dl = (id, vals) => $(id).innerHTML = vals.map(v => `<option value="${esc(v)}">`).join("");
+  // 既存の表記を候補に出して、入力時点でのゆれを防ぐ
+  dl("#dl-player",   uniq(c => c.player));
+  dl("#dl-team",     uniq(c => c.team));
   dl("#dl-brand",    uniq(c => c.brand));
   dl("#dl-product",  uniq(c => c.product));
   dl("#dl-year",     uniq(c => c.year));
@@ -1003,12 +1055,23 @@ function renderStats(){
       `<div class="bar"><div class="bt"><span>${esc(k)}</span><b>${unit === "yen" ? yen(v) : v + " 枚"}</b></div>
        <div class="bg"><div class="bf" style="width:${(v / max * 100).toFixed(1)}%"></div></div></div>`).join("") + `</div>`;
   };
-  const tally = (fn) => { const m = new Map();
-    live.forEach(c => { const k = fn(c); if(k) m.set(k, (m.get(k) || 0) + (c.quantity || 1)); }); return m; };
-
-  const valueByPlayer = new Map();
-  live.forEach(c => { if(marketJPY(c)) valueByPlayer.set(c.player || "（未入力）",
-    (valueByPlayer.get(c.player || "（未入力）") || 0) + marketJPY(c) * (c.quantity || 1)); });
+  /** 表記ゆれを nameKey で吸収して集計し、見出しは実際の表記で出す */
+  const roll = (labelFn, valueFn) => {
+    const m = new Map();                       // key -> { label, v }
+    live.forEach(c => {
+      const label = labelFn(c); if(!label) return;
+      const v = valueFn(c); if(!v) return;
+      const k = nameKey(label);
+      if(!m.has(k)) m.set(k, { label, v:0 });
+      m.get(k).v += v;
+    });
+    return new Map([...m.values()]
+      .sort((a, b) => b.v - a.v)
+      .map(x => [x.label, x.v]));
+  };
+  const tally        = fn => roll(fn, c => c.quantity || 1);
+  const valueByPlayer = roll(c => tidyName(c.player) || "（未入力）",
+                             c => marketJPY(c) * (c.quantity || 1));
 
   $("#stats").innerHTML = `
     <div class="kpis">
@@ -1020,11 +1083,11 @@ function renderStats(){
       <div class="kpi"><div class="k">相場を入力済み</div><div class="v">${priced}<span style="font-size:13px;color:var(--dim)"> / ${live.length}</span></div></div>
     </div>
     ${priced < live.length ? `<p class="note" style="margin-top:12px">相場が未入力のカードが ${live.length - priced} 件あります。合計額はその分だけ実際より低く出ます。</p>` : ""}
-    ${bars("選手別 保有枚数", tally(c => c.player), "n")}
+    ${bars("選手別 保有枚数", tally(c => tidyName(c.player)), "n")}
     ${bars("選手別 評価額", valueByPlayer, "yen")}
     ${bars("メーカー別", tally(c => c.brand), "n")}
     ${bars("年 / シーズン別", tally(c => c.year), "n")}
-    ${bars("チーム別", tally(c => c.team), "n")}
+    ${bars("チーム別", tally(c => tidyName(c.team)), "n")}
     ${bars("保管場所別", tally(c => c.location), "n")}
     <p class="note" style="margin-top:24px">USD建ての金額は 1USD=${S.rate}円 で換算しています（設定タブで変更可）。</p>`;
 }
@@ -1084,7 +1147,7 @@ async function openEditor(card){
 }
 
 async function saveCard(){
-  const player = $("#e-player").value.trim();
+  const player = tidyName($("#e-player").value);
   if(!player){ toast("選手名を入力してください"); $("#e-player").focus(); return; }
 
   const now = Date.now();
@@ -1104,7 +1167,7 @@ async function saveCard(){
     createdAt: editing?.createdAt || now,
     updatedAt: now,
     player,
-    team:        $("#e-team").value.trim(),
+    team:        tidyName($("#e-team").value),
     nationality: $("#e-nat").value.trim(),
     brand:       $("#e-brand").value.trim(),
     product:     $("#e-product").value.trim(),
@@ -1212,7 +1275,8 @@ product は、カード表面または裏面に商品ライン名として実際
 - 著作権表記や製造国の記載
 
 # その他の項目
-- player / team はカード上の表記どおり（通常はアルファベット）。
+- player / team は、カードが全て大文字で印字されていても
+  "LAMINE YAMAL" ではなく "Lamine Yamal" のように語頭だけ大文字にして返す。
 - year はカードに書かれたシーズン表記をそのまま（例 "2023-24" や "2022"）。
 - cardNo は番号のみ（"#" は付けない）。裏面の隅や上部にあることが多い。
 - parallel は色や加工の名称（Silver, Gold, Mojo, Refractor, Holo, Camo など）。
@@ -1763,8 +1827,8 @@ async function bulkSave(){
     const id = uid();
     const c = {
       id, createdAt: now + n, updatedAt: now,
-      player: String(d.player || "").trim(),
-      team: String(d.team || "").trim(), nationality: String(d.nationality || "").trim(),
+      player: tidyName(d.player),
+      team: tidyName(d.team), nationality: tidyName(d.nationality),
       brand: String(d.brand || "").trim(), product: String(d.product || "").trim(),
       year: String(d.year || "").trim(), cardNo: String(d.cardNo || "").trim(),
       parallel: String(d.parallel || "").trim(), serial: String(d.serial || "").trim(),
@@ -2603,6 +2667,55 @@ async function importJSON(file){
   toast(`${d.cards.length} 枚を読み込みました`);
 }
 
+/** 登録済みカードの選手名・チーム名の表記を統一する */
+async function unifyNames(){
+  // 同一人物とみなせるものの中で、最も多く使われている表記に寄せる
+  const build = field => {
+    const m = new Map();                    // key -> Map(表記 -> 件数)
+    cards.forEach(c => {
+      const v = String(c[field] || "").trim(); if(!v) return;
+      const k = nameKey(v); if(!k) return;
+      if(!m.has(k)) m.set(k, new Map());
+      const t = tidyName(v);
+      m.get(k).set(t, (m.get(k).get(t) || 0) + 1);
+    });
+    const best = new Map();
+    for(const [k, forms] of m){
+      // 件数が多い順。同数ならアクセント記号を持つ表記を優先する
+      const pick = [...forms.entries()].sort((a, b) =>
+        b[1] - a[1] || (/[^\x00-\x7F]/.test(b[0]) ? 1 : 0) - (/[^\x00-\x7F]/.test(a[0]) ? 1 : 0))[0][0];
+      best.set(k, pick);
+    }
+    return best;
+  };
+
+  const players = build("player"), teams = build("team");
+  const changes = [];
+  for(const c of cards){
+    const np = c.player ? (players.get(nameKey(c.player)) ?? tidyName(c.player)) : c.player;
+    const nt = c.team   ? (teams.get(nameKey(c.team))     ?? tidyName(c.team))   : c.team;
+    if(np !== c.player || nt !== c.team){
+      changes.push({ c, from:c.player, to:np, fromT:c.team, toT:nt });
+    }
+  }
+
+  if(!changes.length){ alert("表記の乱れは見つかりませんでした。"); return; }
+
+  const sample = changes.slice(0, 8).map(x =>
+    x.from !== x.to ? `　${x.from} → ${x.to}` : `　${x.fromT} → ${x.toT}`).join("\n");
+  if(!confirm(`${changes.length} 枚の表記を統一します。\n\n${sample}` +
+              (changes.length > 8 ? `\n　…ほか ${changes.length - 8} 枚` : "") +
+              `\n\n実行しますか？`)) return;
+
+  for(const x of changes){
+    x.c.player = x.to; x.c.team = x.toT; x.c.updatedAt = Date.now();
+    await dbPut("cards", x.c);
+  }
+  markDirty();
+  refreshOptions(); renderList(); renderStats();
+  alert(`${changes.length} 枚を統一しました。統計タブで集計をご確認ください。`);
+}
+
 async function showQuota(){
   if(!navigator.storage?.estimate) return $("#quota").textContent = "この環境では確認できません。";
   const { usage, quota } = await navigator.storage.estimate();
@@ -2759,6 +2872,7 @@ function bind(){
   $("#impJson").onchange = e => e.target.files[0] && importJSON(e.target.files[0]);
   $("#rate").value = S.rate;
   $("#saveRate").onclick = () => { S.rate = +$("#rate").value || 155; toast("保存しました"); renderStats(); };
+  $("#fixNames").onclick = unifyNames;
   $("#wipe").onclick = async () => {
     if(!confirm("この端末の全てのカードと写真を削除します。本当によろしいですか？")) return;
     if(!confirm(S.gdId
