@@ -2089,12 +2089,21 @@ function syncBadge(msg){
   const el = $("#syncBadge"); if(!el) return;
   const label = {
     off:"", idle:"✓ 同期済み", syncing:"⟳ 同期中…",
-    pending:"… 未同期", error:"⚠ 同期エラー"
+    pending:"… 未同期", error:"⚠ 同期エラー", auth:"🔑 タップして再認証"
   }[syncState];
   el.textContent = msg || label;
   el.className = "sync " + syncState;
   el.classList.toggle("hide", syncState === "off");
 }
+
+/* --- 認証について ---------------------------------------------------------
+   Google のトークン取得はポップアップを開く。iOS Safari は「タップ直後に同期的に
+   開かれたポップアップ」しか許可しないため、await を挟んでから開くとブロックされる。
+   そこで:
+     ・GIS のスクリプトは起動時に先読みしておく
+     ・requestToken() はタップのハンドラ内から await 無しで呼ぶ
+     ・自動同期中に期限が切れたら、勝手に開かず「要再認証」状態にして待つ
+   -------------------------------------------------------------------------- */
 
 function loadGis(){
   if(window.google?.accounts?.oauth2) return Promise.resolve();
@@ -2108,39 +2117,68 @@ function loadGis(){
   });
 }
 
-/** アクセストークンを用意する。interactive=true なら同意画面を出してよい。 */
-async function ensureToken(interactive){
-  if(gTok.token && Date.now() < gTok.exp - 60000) return gTok.token;
-  const cid = S.gdId;
-  if(!cid) throw new Error("クライアントIDが設定されていません");
-  await loadGis();
+const gisReady = () => !!window.google?.accounts?.oauth2;
+const haveToken = () => !!gTok.token && Date.now() < gTok.exp - 60000;
 
-  if(!gis){
-    gis = google.accounts.oauth2.initTokenClient({
-      client_id: cid, scope: DRIVE_SCOPE,
-      callback: r => {
-        if(r.access_token){
-          gTok = { token:r.access_token, exp: Date.now() + (r.expires_in || 3600) * 1000 };
-          gPending?.res(gTok.token);
-        } else gPending?.rej(new Error(r.error_description || r.error || "認証に失敗しました"));
-        gPending = null;
-      },
-      error_callback: e => {
-        gPending?.rej(new Error(e?.type === "popup_closed"
-          ? "認証画面が閉じられました" : (e?.message || "認証できませんでした")));
-        gPending = null;
-      }
-    });
-  }
+/** トークンクライアントを用意する（同期処理・スクリプト読込済みが前提） */
+function initTokenClient(){
+  if(gis) return true;
+  if(!gisReady() || !S.gdId) return false;
+  gis = google.accounts.oauth2.initTokenClient({
+    client_id: S.gdId, scope: DRIVE_SCOPE,
+    callback: r => {
+      if(r.access_token){
+        gTok = { token:r.access_token, exp: Date.now() + (r.expires_in || 3600) * 1000 };
+        gPending?.res(gTok.token);
+      } else gPending?.rej(new Error(r.error_description || r.error || "認証に失敗しました"));
+      gPending = null;
+    },
+    error_callback: e => {
+      gPending?.rej(new Error(
+        e?.type === "popup_closed"        ? "認証画面が閉じられました" :
+        e?.type === "popup_failed_to_open" ? "ポップアップがブロックされました" :
+        (e?.message || "認証できませんでした")));
+      gPending = null;
+    }
+  });
+  return true;
+}
+
+/** ★ 必ずタップのハンドラ内から、await を挟まずに呼ぶこと */
+function requestToken(){
   return new Promise((res, rej) => {
+    if(!initTokenClient()){
+      loadGis().catch(() => {});
+      return rej(new Error("認証の準備中です。数秒おいてもう一度お試しください"));
+    }
     gPending = { res, rej };
-    try { gis.requestAccessToken({ prompt: interactive ? "consent" : "" }); }
+    try { gis.requestAccessToken({ prompt: "" }); }
     catch(e){ gPending = null; rej(e); }
   });
 }
 
+/** 有効なトークンがなければ NEEDS_AUTH を投げる。ここでポップアップは開かない。 */
+async function ensureToken(){
+  if(haveToken()) return gTok.token;
+  const e = new Error("NEEDS_AUTH"); e.code = "NEEDS_AUTH"; throw e;
+}
+
+/** タップ起点で「トークン確保 → 処理」を行う共通ラッパー */
+function withAuth(fn){
+  return function(){
+    if(haveToken()) return fn();
+    const p = requestToken();                 // ← ここまで await を挟まない
+    p.then(() => fn()).catch(err => {
+      syncState = "auth"; syncBadge(); renderSettingsSync();
+      alert("Google の認証が必要です\n\n" + (err.message || "") +
+        "\n\nもう一度ボタンを押してください。ポップアップがブロックされる場合は、" +
+        "設定 → Safari → ポップアップブロック を一時的にオフにしてください。");
+    });
+  };
+}
+
 async function dreq(url, opt = {}, retry = true){
-  const t = await ensureToken(false);
+  const t = await ensureToken();
   const r = await fetch(url, { ...opt, headers:{ ...(opt.headers || {}), Authorization:"Bearer " + t } });
   if(r.status === 401 && retry){ gTok = { token:null, exp:0 }; return dreq(url, opt, false); }
   if(!r.ok){
@@ -2197,6 +2235,11 @@ function markDirty(imgKeys = []){
 async function syncPush(manual){
   if(!S.gdId || syncBusy) return;
   if(!manual && !S.gdDirty) return;
+  // 自動同期のときは、期限切れでもポップアップを開かない（iOSにブロックされるため）
+  if(!haveToken()){
+    syncState = "auth"; syncBadge(); renderSettingsSync();
+    return;
+  }
   syncBusy = true; syncState = "syncing"; syncBadge();
   try{
     const parent = await driveFolder();
@@ -2235,8 +2278,13 @@ async function syncPush(manual){
     if(manual) toast("Google Drive に保存しました");
   }catch(e){
     console.error(e);
-    syncState = "error"; syncBadge();
-    if(manual) alert("同期できませんでした\n\n" + (e.message || ""));
+    if(e.code === "NEEDS_AUTH"){
+      syncState = "auth"; syncBadge();
+      if(manual) alert("Google の認証の有効期限が切れました。\n\nもう一度「今すぐ同期」を押すと再認証されます。");
+    }else{
+      syncState = "error"; syncBadge();
+      if(manual) alert("同期できませんでした\n\n" + (e.message || ""));
+    }
   }finally{
     syncBusy = false;
     renderSettingsSync();
@@ -2251,7 +2299,6 @@ async function syncRestore(){
   const btn = $("#gdRestore");
   btn.disabled = true; btn.innerHTML = `<i class="spin"></i>復元中…`;
   try{
-    await ensureToken(false);
     const parent = await driveFolder();
     const q = encodeURIComponent(`'${parent}' in parents and trashed=false`);
     const list = await djson(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1000`);
@@ -2310,7 +2357,8 @@ async function syncRestore(){
   }
 }
 
-async function syncConnect(){
+/** タップ直後に同期的に呼ばれる必要があるため async にしない */
+function syncConnect(){
   const cid = $("#gd-id").value.trim();
   if(!cid){ toast("クライアントIDを入力してください"); return; }
   if(!/\.apps\.googleusercontent\.com$/.test(cid)){
@@ -2318,23 +2366,27 @@ async function syncConnect(){
   }
   S.gdId = cid;
   gis = null; gTok = { token:null, exp:0 };
+
   const btn = $("#gdConnect");
   btn.disabled = true; btn.innerHTML = `<i class="spin"></i>接続中…`;
-  try{
-    await ensureToken(true);
-    await driveFolder();
-    syncState = "pending"; syncBadge();
-    toast("接続しました。最初の同期を始めます");
-    await syncPush(true);
-  }catch(e){
-    S.gdId = cid;   // IDは残す（再試行しやすいように）
-    syncState = "error"; syncBadge();
-    alert("接続できませんでした\n\n" + (e.message || "") +
-      "\n\n・承認済みJavaScript生成元に、このアプリのURLを登録しましたか？\n・Google Drive API を有効にしましたか？");
-  }finally{
-    btn.disabled = false; btn.textContent = "接続する";
-    renderSettingsSync();
-  }
+  const done = () => { btn.disabled = false; btn.textContent = "接続する"; renderSettingsSync(); };
+
+  requestToken()                       // ← await を挟まずポップアップを開く
+    .then(async () => {
+      await driveFolder();
+      syncState = "pending"; syncBadge();
+      toast("接続しました。最初の同期を始めます");
+      await syncPush(true);
+      done();
+    })
+    .catch(e => {
+      syncState = "error"; syncBadge();
+      alert("接続できませんでした\n\n" + (e.message || "") +
+        "\n\n・承認済みJavaScript生成元に、このアプリのドメインを登録しましたか？\n" +
+        "・Google Drive API を有効にしましたか？\n" +
+        "・OAuth の「対象」でアプリを公開しましたか？");
+      done();
+    });
 }
 
 function syncDisconnect(){
@@ -2355,9 +2407,14 @@ function renderSettingsSync(){
   if(!on) return;
   const last = S.gdLast ? new Date(S.gdLast).toLocaleString("ja-JP") : "まだ同期していません";
   const pend = S.gdPendImg.length;
+  const label = { idle:"同期済み", syncing:"同期中", pending:"未同期の変更あり",
+                  error:"エラー", auth:"認証が必要", off:"—" }[syncState];
   $("#gdStatus").innerHTML =
-    `状態：<b>${{ idle:"同期済み", syncing:"同期中", pending:"未同期の変更あり", error:"エラー", off:"—" }[syncState]}</b><br>` +
-    `最終同期：${last}` + (pend ? `<br><span style="color:var(--warn)">未送信の写真 ${pend} 枚</span>` : "");
+    `状態：<b>${label}</b><br>最終同期：${last}` +
+    (pend ? `<br><span style="color:var(--warn)">未送信の写真 ${pend} 枚（次の同期で送られます）</span>` : "") +
+    (syncState === "auth"
+      ? `<br><span style="color:var(--accent)">「今すぐ同期」を押すとGoogleの認証画面が開きます。</span>`
+      : "");
 }
 
 /* =========================================================
@@ -2545,14 +2602,16 @@ function bind(){
   };
   $("#gd-id").value = S.gdId;
   $("#gdConnect").onclick = syncConnect;
-  $("#gdSync").onclick    = () => syncPush(true);
-  $("#gdRestore").onclick = syncRestore;
+  $("#gdSync").onclick    = withAuth(() => syncPush(true));
+  $("#gdRestore").onclick = withAuth(syncRestore);
   $("#gdOffBtn").onclick  = syncDisconnect;
+  // ヘッダーのバッジからも再認証できるようにする
+  $("#syncBadge").onclick = withAuth(() => syncPush(true));
+
   if(S.gdId){
-    syncState = S.gdDirty || S.gdPendImg.length ? "pending" : "idle";
+    loadGis().then(initTokenClient).catch(() => {});   // タップ時に備えて先読み
+    syncState = "auth";                                 // 起動直後はトークンが無い
     syncBadge();
-    // 前回送りきれなかった分があれば、起動時に片づける
-    if(S.gdDirty || S.gdPendImg.length) setTimeout(() => syncPush(false), 2500);
   }
   renderSettingsSync();
   // 離脱時に未送信があれば知らせる
