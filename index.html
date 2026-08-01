@@ -435,6 +435,9 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
       <button class="btn ghost" id="aiTest">接続テスト</button>
       <button class="btn" id="aiSave">保存</button>
     </div>
+    <p class="note" style="margin-top:6px">
+      接続テストは<b>入力済みのキーをすべて</b>確認します（Gemini・Claude の読み取りと、相場調べの検索）。
+      保存する前でも、入力欄の内容で試せます。</p>
     <div class="quotaWarn hide" id="setQuota" style="margin-top:12px"></div>
 
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
@@ -645,8 +648,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
         全部撮り終えたら、下の「読み取りを開始」を押します。</p>
 
       <div id="bkPreview"></div>
-      <p class="note hide" id="bkNoAi" style="margin-top:12px">
-        AI読み取りが未設定です。このまま進めると<b>写真だけを取り込み</b>、カード情報は後から手入力になります。</p>
+      <p class="note hide" id="bkNoAi" style="margin-top:12px"></p>
     </div>
 
     <!-- stage 2 -->
@@ -787,7 +789,10 @@ const S = {
   get gdDirty(){ return localStorage.getItem("cv.gdDirty") === "1"; },
   set gdDirty(v){ localStorage.setItem("cv.gdDirty", v ? "1" : "0"); },
   get quotaAt(){ return +(localStorage.getItem("cv.quotaAt") || 0); },
-  set quotaAt(v){ localStorage.setItem("cv.quotaAt", v); }
+  set quotaAt(v){ localStorage.setItem("cv.quotaAt", v); },
+  // 上限は提供元ごとに別管理する（Gemini が尽きても Claude は使えるため）
+  get quotaMap(){ try { return JSON.parse(localStorage.getItem("cv.quotaMap") || "{}"); } catch { return {}; } },
+  set quotaMap(v){ localStorage.setItem("cv.quotaMap", JSON.stringify(v)); }
 };
 
 /** 提供元ごとのAPIキーを取り出す */
@@ -1496,22 +1501,48 @@ function quotaResetText(){
   return { ms, at, text: `あと約 ${h ? h + "時間" : ""}${m}分（${at}頃）` };
 }
 
-function noteQuotaHit(){ S.quotaAt = Date.now(); renderQuota(); }
+const PROV_NAME = { gemini:"Gemini", claude:"Claude" };
 
-/** 上限に当たっているときだけ、残り時間を各画面に出す */
+/** 上限に当たったことを提供元ごとに記録する */
+function noteQuotaHit(prov = S.aiProv){
+  if(!prov) return;
+  S.quotaMap = { ...S.quotaMap, [prov]: Date.now() };
+  renderQuota();
+}
+
+/** その提供元がいま上限で止まっているか */
+function quotaBlocked(prov = S.aiProv){
+  const at = S.quotaMap[prov] || 0;
+  return at > 0 && Date.now() < +nextQuotaReset(new Date(at));
+}
+
+/** 状況に応じた注意書きを各画面に出す */
 function renderQuota(){
-  const on = quotaBlocked();
-  const q  = on ? quotaResetText() : null;
-  const html = on
-    ? `<b>⏳ AIの1日あたりの上限に達しています</b><br>` +
+  const prov = S.aiProv;
+  let html = "";
+
+  if(prov && !keyFor(prov)){
+    // 提供元を選んでいるのにキーが無い。黙って写真だけ取り込むと理由が分からないので明示する。
+    html = `<b>⚠ ${PROV_NAME[prov]} のAPIキーが未登録です</b><br>` +
+      `このままだと読み取りは行われず、写真だけの登録になります。<br>` +
+      `<span style="color:var(--dim)">設定タブの「${PROV_NAME[prov]} の APIキー」に登録してください。</span>`;
+  }else if(prov && quotaBlocked(prov)){
+    const q = quotaResetText();
+    const other = prov === "gemini" ? "claude" : "gemini";
+    const canSwitch = keyFor(other) && !quotaBlocked(other);
+    html = `<b>⏳ ${PROV_NAME[prov]} の1日あたりの上限に達しています</b><br>` +
       `回復まで <b>${q.text}</b><br>` +
-      `<span style="color:var(--dim)">Google の仕様で米国太平洋時間の午前0時に回復します。` +
-      `写真の撮影と手入力での登録は、いま行えます。</span>`
-    : "";
+      `<span style="color:var(--dim)">` +
+      (canSwitch
+        ? `設定タブで「使用するAI」を ${PROV_NAME[other]} に切り替えれば、いま続けられます。`
+        : `写真の撮影と手入力での登録は、いま行えます。`) +
+      `</span>`;
+  }
+
   ["#aiQuota", "#bkQuota", "#setQuota"].forEach(sel => {
     const el = $(sel); if(!el) return;
     el.innerHTML = html;
-    el.classList.toggle("hide", !on);
+    el.classList.toggle("hide", !html);
   });
 }
 
@@ -1612,9 +1643,9 @@ async function runAI(){
     let m = err.message || "読み取りに失敗しました";
     if(/API key not valid|invalid x-api-key|authentication/i.test(m)) m = "APIキーが正しくありません";
     else if(QUOTA_RE.test(m)){
-      noteQuotaHit();
+      noteQuotaHit(prov);
       const q = quotaResetText();
-      m = `AIの利用上限に達しました。\n\n回復まで ${q.text}\n` +
+      m = `${PROV_NAME[prov]} の利用上限に達しました。\n\n回復まで ${q.text}\n` +
           "（Google の仕様で、米国太平洋時間の午前0時に回復します）\n\n" +
           "急ぐ場合は、設定タブでモデルを Flash-Lite に変えると\n1日の上限が緩和されることがあります。";
     }
@@ -1687,22 +1718,67 @@ function fillModelSelect(){
   if(S.aiModel && [...sel.options].some(o => o.value === S.aiModel)) sel.value = S.aiModel;
 }
 
+/** エラー文を短い日本語にする */
+function testErr(e){
+  const m = e?.message || "";
+  if(/API key not valid|invalid x-api-key|authentication|401/i.test(m)) return "APIキーが正しくありません";
+  if(/credit balance|billing|payment/i.test(m))                         return "残高が不足しています";
+  if(QUOTA_RE.test(m))                                                  return "利用上限に達しています";
+  if(/not found|does not exist|404/i.test(m))                           return "そのモデルは利用できません";
+  if(/Failed to fetch|NetworkError/i.test(m))                           return "通信できませんでした";
+  if(/tool|search|not supported|not available/i.test(m))                return "このモデルでは検索が使えません";
+  return m.slice(0, 70) || "不明なエラー";
+}
+
+/** 入力済みのキーをすべて試し、結果をまとめて報告する */
 async function testAI(){
-  const prov  = $("#ai-prov").value;
-  const key   = (prov === "claude" ? $("#ai-key-claude") : $("#ai-key-gemini")).value.trim();
-  const model = $("#ai-model").value;
-  if(!prov || !key) return toast("AIとキーを選んでください");
-  const btn = $("#aiTest"); btn.disabled = true; btn.textContent = "接続中…";
-  // 1x1 の白いJPEGで疎通だけ確認する
+  const gk = $("#ai-key-gemini").value.trim();
+  const ck = $("#ai-key-claude").value.trim();
+  if(!gk && !ck) return toast("APIキーを入力してください");
+
+  const btn = $("#aiTest");
+  btn.disabled = true; btn.innerHTML = `<i class="spin"></i>確認中…`;
+
+  // 8x8 の白い画像で疎通だけ確認する
   const cv = document.createElement("canvas"); cv.width = cv.height = 8;
   const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, 8, 8);
   const b64 = cv.toDataURL("image/jpeg").split(",")[1];
-  try{
-    prov === "gemini" ? await callGemini([b64], key, model) : await callClaude([b64], key, model);
-    alert("接続できました。写真からの読み取りが使えます。");
-  }catch(e){
-    alert("接続できませんでした\n\n" + (e.message || ""));
-  }finally{ btn.disabled = false; btn.textContent = "接続テスト"; }
+
+  const sel  = $("#ai-prov").value;
+  const gMod = sel === "gemini" ? $("#ai-model").value : AI_MODELS.gemini[0][0];
+  const cMod = sel === "claude" ? $("#ai-model").value : AI_MODELS.claude[0][0];
+  const pMod = $("#px-model").value;
+  const lines = [];
+
+  if(gk){
+    btn.innerHTML = `<i class="spin"></i>Gemini を確認中…`;
+    try { await callGemini([b64], gk, gMod);
+      lines.push(`✓ Gemini 読み取り：OK\n　（${gMod}）`); }
+    catch(e){ lines.push(`✗ Gemini 読み取り：${testErr(e)}\n　（${gMod}）`); }
+  } else lines.push("－ Gemini：キー未入力");
+
+  if(ck){
+    btn.innerHTML = `<i class="spin"></i>Claude を確認中…`;
+    try { await callClaude([b64], ck, cMod);
+      lines.push(`✓ Claude 読み取り：OK\n　（${cMod}）`); }
+    catch(e){ lines.push(`✗ Claude 読み取り：${testErr(e)}\n　（${cMod}）`); }
+  } else lines.push("－ Claude：キー未入力");
+
+  // 相場調べは検索が必要。無料枠では 3.x 系が使えないため、ここで先に分かるようにする。
+  if(gk){
+    btn.innerHTML = `<i class="spin"></i>相場調べを確認中…`;
+    try {
+      await callGeminiSearch("今日の日付を一言で答えてください。", gk, pMod);
+      lines.push(`✓ 相場調べ（Google検索）：OK\n　（${pMod}）`);
+    }catch(e){
+      const hint = /^gemini-3/.test(pMod)
+        ? "\n　→ 無料枠では 3.x 系の検索は使えません。\n　　 2.5 Flash に変えてお試しください。" : "";
+      lines.push(`✗ 相場調べ（Google検索）：${testErr(e)}\n　（${pMod}）${hint}`);
+    }
+  } else lines.push("－ 相場調べ：Gemini のキーが必要です");
+
+  btn.disabled = false; btn.textContent = "接続テスト";
+  alert("接続テストの結果\n\n" + lines.join("\n\n"));
 }
 
 /* =========================================================
@@ -1835,7 +1911,15 @@ function bulkStage(n){
   $("#bkProgress").classList.toggle("hide", n !== 2);
   $("#bkReview").classList.toggle("hide", n !== 3);
   const aiOn = aiReady();
-  $("#bkNoAi").classList.toggle("hide", aiOn || n !== 1);
+  // 読み取りが行われない理由を必ず明示する（黙って写真だけ取り込まない）
+  const why = !S.aiProv
+    ? `AI読み取りは<b>オフ</b>です。<b>写真だけを取り込み</b>、カード情報は後から手入力になります。`
+    : !keyFor(S.aiProv)
+      ? `<b style="color:var(--warn)">${PROV_NAME[S.aiProv]} のAPIキーが未登録です。</b>` +
+        `このまま進めると<b>写真だけ</b>が登録されます。`
+      : "";
+  $("#bkNoAi").innerHTML = why;
+  $("#bkNoAi").classList.toggle("hide", !why || n !== 1);
 
   const title = { 1:"一括登録", 2:"読み取り中", 3:"確認して登録" }[n];
   $("#bkTitle").textContent = title;
@@ -1933,7 +2017,7 @@ async function bulkRun(){
         }
         // 2回目も上限なら「1日あたりの上限」。以降も必ず失敗するので中断する。
         if(isQuota){
-          noteQuotaHit();
+          noteQuotaHit(S.aiProv);
           quotaStopped = true;
           bulk.abort = true;
           it.status = "err"; it.error = "利用上限"; it.data = normalizeAI({});
@@ -1961,11 +2045,13 @@ async function bulkRun(){
 
   if(quotaStopped){
     const q = quotaResetText();
+    const other = S.aiProv === "gemini" ? "claude" : "gemini";
+    const hint = keyFor(other) && !quotaBlocked(other)
+      ? `\n設定タブで「使用するAI」を ${PROV_NAME[other]} に切り替えれば、いま続けられます。\n` : "";
     alert(
-      "AIの1日あたりの利用上限に達しました。\n\n" +
+      `${PROV_NAME[S.aiProv]} の1日あたりの利用上限に達しました。\n\n` +
       `読み取り済み：${ok} 件\n未読み取り：${total - done} 件\n\n` +
-      `上限の回復まで ${q.text}\n` +
-      "（Google の仕様で、米国太平洋時間の午前0時に回復します）\n\n" +
+      `上限の回復まで ${q.text}\n` + hint + "\n" +
       "撮影した写真は残っています。このまま「登録」すれば写真だけ先に保存でき、\n" +
       "カード情報は後から手入力またはAIで追加できます。");
   }else{
@@ -2183,7 +2269,7 @@ async function runPriceLookup(cardId){
     if(/API key not valid/i.test(m))                  m = "Gemini のAPIキーが正しくありません";
     else if(/not supported|not available|tool/i.test(m) && /^gemini-3/.test(S.pxModel))
       m = `${S.pxModel} は無料枠では検索が使えません。\n\n設定タブの「相場調べに使うモデル」を\n2.5 Flash に変えてお試しください。`;
-    else if(QUOTA_RE.test(m)){ noteQuotaHit(); m = `利用上限に達しました。\n回復まで ${quotaResetText().text}`; }
+    else if(QUOTA_RE.test(m)){ noteQuotaHit("gemini"); m = `Gemini の利用上限に達しました。\n回復まで ${quotaResetText().text}`; }
     else if(/Failed to fetch/i.test(m))               m = "通信できませんでした";
     else if(/JSON|Unexpected/i.test(m))               m = "結果を読み取れませんでした。もう一度お試しください";
     alert("相場を取得できませんでした\n\n" + m);
@@ -3133,6 +3219,11 @@ function bind(){
   if(S.aiKey && !Object.keys(S.aiKeys).length && S.aiProv){
     S.aiKeys = { [S.aiProv]: S.aiKey };
     localStorage.removeItem("cv.aiKey");
+  }
+  // 提供元別になる前の上限記録を Gemini のものとして引き継ぐ
+  if(S.quotaAt && !Object.keys(S.quotaMap).length){
+    S.quotaMap = { gemini: S.quotaAt };
+    localStorage.removeItem("cv.quotaAt");
   }
   // 保管場所の一覧が空なら、登録済みカードの値から作る
   if(!S.locations.length){
