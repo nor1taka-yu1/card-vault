@@ -197,6 +197,12 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 .quotaWarn{padding:11px 13px;border-radius:var(--r);background:rgba(245,165,36,.1);
   border:1px solid rgba(245,165,36,.4);font-size:12.5px;line-height:1.75;color:var(--fg)}
 .quotaWarn b{color:var(--warn)}
+.locrow{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)}
+.locrow:last-child{border-bottom:0}
+.locname{flex:1;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.locn{font-size:11px;color:var(--dim);white-space:nowrap}
+.locdel{background:transparent;border:1px solid var(--line);color:var(--bad);
+  font-size:11px;padding:4px 9px;border-radius:6px}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
   border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -414,15 +420,32 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
     <div class="row one" style="margin-top:10px">
       <div class="f"><label>モデル</label><select id="ai-model"></select></div>
     </div>
-    <div class="row one" style="margin-top:10px">
-      <div class="f"><label>APIキー</label>
-        <input type="password" id="ai-key" placeholder="貼り付け" autocomplete="off" spellcheck="false"></div>
+    <div class="row one" style="margin-top:14px">
+      <div class="f"><label>Gemini の APIキー</label>
+        <input type="password" id="ai-key-gemini" placeholder="AIza…" autocomplete="off" spellcheck="false"></div>
     </div>
+    <div class="row one" style="margin-top:10px">
+      <div class="f"><label>Claude の APIキー</label>
+        <input type="password" id="ai-key-claude" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <p class="note" style="margin-top:6px">
+      両方を登録しておけば、上の「使用するAI」を切り替えるだけで行き来できます。片方だけでも構いません。</p>
+
     <div class="row" style="margin-top:10px">
       <button class="btn ghost" id="aiTest">接続テスト</button>
       <button class="btn" id="aiSave">保存</button>
     </div>
     <div class="quotaWarn hide" id="setQuota" style="margin-top:12px"></div>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+    <div class="row one">
+      <div class="f"><label>相場調べに使うモデル</label><select id="px-model"></select></div>
+    </div>
+    <p class="note" style="margin-top:6px">
+      相場調べは Google検索が必要なため <b>Gemini 専用</b>です。上の「使用するAI」で Claude を選んでいても、
+      ここで指定したモデルと Gemini のキーを使います。<br>
+      <b style="color:var(--warn)">Gemini 3.x 系は無料枠では検索が使えません。</b>
+      無料のまま相場調べを使うなら 2.5 系を選んでください。</p>
     <p class="note" style="margin-top:10px">
       キーは<b>このiPhoneのブラウザ内だけ</b>に保存され、GitHubには一切送られません。<br>
       通信はブラウザから各社APIへ直接行われ、写真や情報が私や第三者に渡ることはありません。<br><br>
@@ -437,6 +460,16 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
     <p class="note" style="margin-top:8px;color:var(--warn)">
       キーを他人に渡さないでください。もし漏れたと思ったら、上のリンク先でそのキーを削除して作り直せば無効化できます。
     </p>
+  </fieldset>
+
+  <fieldset style="margin-top:14px"><legend>保管場所の管理</legend>
+    <p class="note">ここに登録した場所が、カード登録画面のプルダウンに並びます。</p>
+    <div id="locList" style="margin-top:10px"></div>
+    <div class="row" style="margin-top:10px;grid-template-columns:1fr auto">
+      <input id="locNew" placeholder="例：バインダーA / ファイルB / 保管庫" autocomplete="off"
+        style="padding:9px 10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;outline:none">
+      <button class="btn" id="locAdd">追加</button>
+    </div>
   </fieldset>
 
   <fieldset style="margin-top:14px"><legend>データの整理</legend>
@@ -551,7 +584,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
       </div>
       <div class="row" style="margin-top:10px">
         <div class="f"><label>購入元</label><input id="e-src" list="dl-src" placeholder="eBay" autocomplete="off"></div>
-        <div class="f"><label>保管場所</label><input id="e-loc" list="dl-loc" placeholder="バインダーA" autocomplete="off"></div>
+        <div class="f"><label>保管場所</label><select id="e-loc"></select></div>
       </div>
     </fieldset>
 
@@ -637,7 +670,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
           <div class="f"><label>購入元</label><input id="bk-src" placeholder="eBay"></div>
         </div>
         <div class="row" style="margin-top:10px">
-          <div class="f"><label>保管場所</label><input id="bk-loc" placeholder="バインダーA"></div>
+          <div class="f"><label>保管場所</label><select id="bk-loc"></select></div>
           <div class="f"><label>タグ</label><input id="bk-tags" placeholder="2024年購入"></div>
         </div>
         <p class="note" style="margin-top:8px">同じ箱・同じ購入分をまとめて入れるときに便利です。空欄なら何も入りません。</p>
@@ -673,7 +706,6 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 <datalist id="dl-year"></datalist>
 <datalist id="dl-parallel"></datalist>
 <datalist id="dl-src"></datalist>
-<datalist id="dl-loc"></datalist>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -728,6 +760,14 @@ const S = {
   set aiModel(v){ localStorage.setItem("cv.aiModel", v); },
   get aiKey(){ return localStorage.getItem("cv.aiKey") || ""; },
   set aiKey(v){ localStorage.setItem("cv.aiKey", v); },
+  // 提供元ごとに鍵を保持する（Gemini と Claude を行き来できるように）
+  get aiKeys(){ try { return JSON.parse(localStorage.getItem("cv.aiKeys") || "{}"); } catch { return {}; } },
+  set aiKeys(v){ localStorage.setItem("cv.aiKeys", JSON.stringify(v)); },
+  // 相場調べは検索が必要なので Gemini 固定。読み取りとは別に選ぶ。
+  get pxModel(){ return localStorage.getItem("cv.pxModel") || "gemini-2.5-flash"; },
+  set pxModel(v){ localStorage.setItem("cv.pxModel", v); },
+  get locations(){ try { return JSON.parse(localStorage.getItem("cv.locations") || "[]"); } catch { return []; } },
+  set locations(v){ localStorage.setItem("cv.locations", JSON.stringify([...new Set(v.filter(Boolean))])); },
   get view(){ return localStorage.getItem("cv.view") === "list" ? "list" : "grid"; },
   set view(v){ localStorage.setItem("cv.view", v); },
 
@@ -749,6 +789,19 @@ const S = {
   get quotaAt(){ return +(localStorage.getItem("cv.quotaAt") || 0); },
   set quotaAt(v){ localStorage.setItem("cv.quotaAt", v); }
 };
+
+/** 提供元ごとのAPIキーを取り出す */
+const keyFor = prov => (S.aiKeys || {})[prov] || "";
+/** 読み取りが使える状態か */
+const aiReady = () => !!(S.aiProv && keyFor(S.aiProv));
+
+/** 相場調べに使えるモデル（Google検索グラウンディングが必要） */
+const PX_MODELS = [
+  ["gemini-2.5-flash",      "2.5 Flash — 無料枠で検索が使える（推奨）"],
+  ["gemini-2.5-flash-lite", "2.5 Flash-Lite — 無料枠で検索が使える"],
+  ["gemini-3.6-flash",      "3.6 Flash — 高精度（検索は有料のみ）"],
+  ["gemini-3.5-flash",      "3.5 Flash — 高精度（検索は有料のみ）"]
+];
 
 const AI_MODELS = {
   gemini: [
@@ -808,6 +861,63 @@ function tidyName(s){
     .replace(/\bMc([a-z])/g,  (_, c) => "Mc" + c.toUpperCase())   // Mctominay → McTominay
     .replace(/\bMac([a-z])/g, (_, c) => "Mac" + c.toUpperCase())
     .replace(/\bO['’]([a-z])/g, (_, c) => "O'" + c.toUpperCase()); // O'riley → O'Riley
+}
+
+/* --- 保管場所 --------------------------------------------------------------- */
+
+/** 保管場所のプルダウンを作る。末尾に「新しい場所を追加」を置き、登録中でも手が止まらないようにする */
+function fillLocSelect(sel, current){
+  const el = $(sel); if(!el) return;
+  const list = S.locations;
+  const cur  = current ?? el.value;
+  el.innerHTML =
+    `<option value="">（指定なし）</option>` +
+    list.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("") +
+    // 一覧に無い値が入っていたら、消えないよう選択肢として残す
+    (cur && !list.includes(cur) ? `<option value="${esc(cur)}">${esc(cur)}（一覧外）</option>` : "") +
+    `<option value="__new">＋ 新しい場所を追加…</option>`;
+  el.value = cur || "";
+}
+
+/** 保存時の値。「＋新しい場所」が選ばれたままなら空にする */
+const locValue = sel => { const v = $(sel)?.value || ""; return v === "__new" ? "" : v; };
+
+/** 「＋ 新しい場所」が選ばれたときの処理 */
+function onLocChange(sel){
+  const el = $(sel);
+  if(el.value !== "__new") return;
+  const name = (prompt("新しい保管場所の名前") || "").trim();
+  if(!name){ fillLocSelect(sel, ""); return; }
+  S.locations = [...S.locations, name];
+  ["#e-loc", "#bk-loc"].forEach(s => { if($(s) && s !== sel) fillLocSelect(s); });
+  fillLocSelect(sel, name);
+  renderLocList();
+  toast(`「${name}」を追加しました`);
+}
+
+function renderLocList(){
+  const box = $("#locList"); if(!box) return;
+  const list = S.locations;
+  const used = new Map();
+  cards.forEach(c => { if(c.location) used.set(c.location, (used.get(c.location) || 0) + 1); });
+
+  box.innerHTML = !list.length
+    ? `<p class="note">まだ登録がありません。下の欄から追加してください。</p>`
+    : list.map(v => `<div class="locrow">
+        <span class="locname">${esc(v)}</span>
+        <span class="locn">${used.get(v) || 0} 枚</span>
+        <button class="locdel" data-loc="${esc(v)}" type="button">削除</button>
+      </div>`).join("");
+
+  box.onclick = e => {
+    const v = e.target.dataset?.loc; if(v === undefined) return;
+    const n = used.get(v) || 0;
+    if(n && !confirm(`「${v}」は ${n} 枚のカードで使われています。\n一覧からは消しますが、カード側の記録はそのまま残ります。\n\n削除しますか？`)) return;
+    S.locations = S.locations.filter(x => x !== v);
+    renderLocList();
+    ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
+    toast("削除しました");
+  };
 }
 
 /** カード名の組み立て（検索クエリにも使う） */
@@ -1041,7 +1151,6 @@ function refreshOptions(){
   dl("#dl-year",     uniq(c => c.year));
   dl("#dl-parallel", uniq(c => c.parallel));
   dl("#dl-src",      uniq(c => c.purchaseSource));
-  dl("#dl-loc",      uniq(c => c.location));
 }
 
 /* =========================================================
@@ -1130,7 +1239,8 @@ async function openEditor(card){
   set("#e-gc", c.gradeCompany); set("#e-grade", c.grade);     set("#e-cert", c.cert);
   set("#e-pdate", c.purchaseDate); set("#e-qty", c.quantity ?? 1);
   set("#e-price", c.purchasePrice); set("#e-cur", c.purchaseCurrency || "JPY");
-  set("#e-src", c.purchaseSource); set("#e-loc", c.location);
+  set("#e-src", c.purchaseSource);
+  fillLocSelect("#e-loc", c.location || "");
   set("#e-mkt", c.marketPrice); set("#e-mcur", c.marketCurrency || "JPY");
   set("#e-tags", (c.tags || []).join(", ")); set("#e-memo", c.memo);
   $("#e-rc").checked = !!c.isRookie; $("#e-auto").checked = !!c.isAuto;
@@ -1146,7 +1256,7 @@ async function openEditor(card){
   $("#fFront").value = ""; $("#fBack").value = "";
 
   hideAIPanel();
-  const aiOn = !!(S.aiProv && S.aiKey);
+  const aiOn = aiReady();
   $("#aiRun").classList.toggle("hide", !aiOn);
   $("#aiHint").classList.toggle("hide", aiOn);
   renderQuota();
@@ -1194,7 +1304,7 @@ async function saveCard(){
     purchasePrice:    $("#e-price").value ? +$("#e-price").value : null,
     purchaseCurrency: $("#e-cur").value,
     purchaseSource:   $("#e-src").value.trim(),
-    location:         $("#e-loc").value.trim(),
+    location:         locValue("#e-loc"),
     marketPrice: mkt, marketCurrency: mcur,
     marketUpdatedAt: mkt !== null ? now : (editing?.marketUpdatedAt || null),
     priceHistory: hist,
@@ -1480,7 +1590,7 @@ function parseAIJson(text){
 let aiResult = null;
 
 async function runAI(){
-  const prov = S.aiProv, key = S.aiKey;
+  const prov = S.aiProv, key = keyFor(prov);
   if(!prov || !key){ toast("設定タブでAPIキーを登録してください"); return; }
 
   const imgs = await editorImagesB64();
@@ -1490,7 +1600,8 @@ async function runAI(){
   btn.disabled = true;
   btn.innerHTML = `<i class="spin"></i>読み取り中…（10秒ほど）`;
   try{
-    const model = S.aiModel || AI_MODELS[prov][0][0];
+    const model = (S.aiModel && AI_MODELS[prov].some(m => m[0] === S.aiModel))
+                  ? S.aiModel : AI_MODELS[prov][0][0];
     const raw = prov === "gemini" ? await callGemini(imgs, key, model) : await callClaude(imgs, key, model);
     aiResult = normalizeAI(parseAIJson(raw));
     showAIPanel(aiResult);
@@ -1577,7 +1688,9 @@ function fillModelSelect(){
 }
 
 async function testAI(){
-  const prov = $("#ai-prov").value, key = $("#ai-key").value.trim(), model = $("#ai-model").value;
+  const prov  = $("#ai-prov").value;
+  const key   = (prov === "claude" ? $("#ai-key-claude") : $("#ai-key-gemini")).value.trim();
+  const model = $("#ai-model").value;
   if(!prov || !key) return toast("AIとキーを選んでください");
   const btn = $("#aiTest"); btn.disabled = true; btn.textContent = "接続中…";
   // 1x1 の白いJPEGで疎通だけ確認する
@@ -1613,7 +1726,8 @@ function bulkReset(){
   $("#bkRows").innerHTML = "";
   $("#bkLog").innerHTML = "";
   $$('input[name="bkmode"]').forEach((r, i) => r.checked = i === 0);
-  ["#bk-pdate","#bk-src","#bk-loc","#bk-tags"].forEach(s => $(s).value = "");
+  ["#bk-pdate","#bk-src","#bk-tags"].forEach(s => $(s).value = "");
+  fillLocSelect("#bk-loc", "");
   bulkRenderShots();
   bulkStage(1);
 }
@@ -1720,7 +1834,7 @@ function bulkStage(n){
   $("#bkSetup").classList.toggle("hide", n !== 1);
   $("#bkProgress").classList.toggle("hide", n !== 2);
   $("#bkReview").classList.toggle("hide", n !== 3);
-  const aiOn = !!(S.aiProv && S.aiKey);
+  const aiOn = aiReady();
   $("#bkNoAi").classList.toggle("hide", aiOn || n !== 1);
 
   const title = { 1:"一括登録", 2:"読み取り中", 3:"確認して登録" }[n];
@@ -1757,7 +1871,7 @@ async function bulkRun(){
   bulk.items = items;
   bulk.mode = bulkMode();
 
-  const aiOn = !!(S.aiProv && S.aiKey);
+  const aiOn = aiReady();
   bulk.abort = false; bulk.running = true;
   bulkStage(2);
 
@@ -1799,8 +1913,9 @@ async function bulkRun(){
           try { b = await canvasBlob(await shrink(p.file, 2200, 0.92), 0.92) || p.blob; } catch {}
           imgs.push(await blobToB64(b));
         }
-        const raw = S.aiProv === "gemini" ? await callGemini(imgs, S.aiKey, model)
-                                          : await callClaude(imgs, S.aiKey, model);
+        const k = keyFor(S.aiProv);
+        const raw = S.aiProv === "gemini" ? await callGemini(imgs, k, model)
+                                          : await callClaude(imgs, k, model);
         it.data = normalizeAI(parseAIJson(raw));
         it.status = "ok"; ok++;
         log(`${done}枚目：${esc(it.data.player || "（選手名なし）")}`);
@@ -1903,7 +2018,7 @@ async function bulkSave(){
   const common = {
     purchaseDate:   $("#bk-pdate").value,
     purchaseSource: $("#bk-src").value.trim(),
-    location:       $("#bk-loc").value.trim(),
+    location:       locValue("#bk-loc"),
     tags:           $("#bk-tags").value.split(",").map(s => s.trim()).filter(Boolean)
   };
 
@@ -2047,25 +2162,28 @@ let priceResult = null;   // { cardId, data, sources }
 
 async function runPriceLookup(cardId){
   const c = cards.find(x => x.id === cardId); if(!c) return;
-  if(S.aiProv !== "gemini" || !S.aiKey){
-    alert("相場の自動取得は Gemini でのみ利用できます。\n\n設定タブで「Google Gemini」を選び、APIキーを登録してください。\n" +
-          "（eBay の公式APIはブラウザから直接呼べないため、検索機能を持つ Gemini を使っています）");
+  // 読み取りに何を使っていても、相場調べは Gemini のキーを使う
+  const gkey = keyFor("gemini");
+  if(!gkey){
+    alert("相場の自動取得には Gemini のAPIキーが必要です。\n\n設定タブの「Gemini の APIキー」に登録してください。\n" +
+          "（eBay の公式APIはブラウザから直接呼べないため、検索できる Gemini を使っています）");
     return;
   }
   const btn = $("#pxRun"); if(!btn) return;
   btn.disabled = true;
   btn.innerHTML = `<i class="spin"></i>検索して調べています…（20秒ほど）`;
   try{
-    const model = S.aiModel || AI_MODELS.gemini[0][0];
-    const { text, sources } = await callGeminiSearch(pricePrompt(c), S.aiKey, model);
+    const { text, sources } = await callGeminiSearch(pricePrompt(c), gkey, S.pxModel);
     const d = parseAIJson(text);
     priceResult = { cardId, data:d, sources };
     renderPriceResult();
   }catch(e){
     console.error(e);
     let m = e.message || "";
-    if(/API key not valid/i.test(m))                  m = "APIキーが正しくありません";
-    else if(/quota|RESOURCE_EXHAUSTED|429/i.test(m))  m = "利用上限に達しました。時間をおいてください";
+    if(/API key not valid/i.test(m))                  m = "Gemini のAPIキーが正しくありません";
+    else if(/not supported|not available|tool/i.test(m) && /^gemini-3/.test(S.pxModel))
+      m = `${S.pxModel} は無料枠では検索が使えません。\n\n設定タブの「相場調べに使うモデル」を\n2.5 Flash に変えてお試しください。`;
+    else if(QUOTA_RE.test(m)){ noteQuotaHit(); m = `利用上限に達しました。\n回復まで ${quotaResetText().text}`; }
     else if(/Failed to fetch/i.test(m))               m = "通信できませんでした";
     else if(/JSON|Unexpected/i.test(m))               m = "結果を読み取れませんでした。もう一度お試しください";
     alert("相場を取得できませんでした\n\n" + m);
@@ -2915,14 +3033,33 @@ function bind(){
   $("#aiCancel").onclick = hideAIPanel;
   $("#ai-prov").value = S.aiProv;
   fillModelSelect();
-  $("#ai-key").value = S.aiKey;
+  $("#ai-key-gemini").value = keyFor("gemini");
+  $("#ai-key-claude").value = keyFor("claude");
+  $("#px-model").innerHTML = PX_MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+  $("#px-model").value = S.pxModel;
   $("#ai-prov").onchange = fillModelSelect;
   $("#aiTest").onclick = testAI;
   $("#aiSave").onclick = () => {
     S.aiProv  = $("#ai-prov").value;
     S.aiModel = $("#ai-model").value;
-    S.aiKey   = $("#ai-key").value.trim();
-    toast(S.aiProv && S.aiKey ? "保存しました" : "AI読み取りをオフにしました");
+    S.aiKeys  = { gemini: $("#ai-key-gemini").value.trim(),
+                  claude: $("#ai-key-claude").value.trim() };
+    S.pxModel = $("#px-model").value;
+    toast(aiReady() ? "保存しました" : "AI読み取りをオフにしました");
+  };
+
+  // 保管場所
+  renderLocList();
+  ["#e-loc", "#bk-loc"].forEach(s => { fillLocSelect(s); $(s).onchange = () => onLocChange(s); });
+  $("#locAdd").onclick = () => {
+    const v = $("#locNew").value.trim();
+    if(!v) return toast("名前を入力してください");
+    if(S.locations.includes(v)) return toast("すでに登録されています");
+    S.locations = [...S.locations, v];
+    $("#locNew").value = "";
+    renderLocList();
+    ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
+    toast(`「${v}」を追加しました`);
   };
 
   // Google Drive 同期
@@ -2990,6 +3127,19 @@ function bind(){
   }
   cards = await dbAll("cards");
   cards.sort((a, b) => b.createdAt - a.createdAt);
+
+  // --- 旧バージョンからの引き継ぎ ---
+  // 1つだけ持っていたAPIキーを、提供元ごとの保管場所へ移す
+  if(S.aiKey && !Object.keys(S.aiKeys).length && S.aiProv){
+    S.aiKeys = { [S.aiProv]: S.aiKey };
+    localStorage.removeItem("cv.aiKey");
+  }
+  // 保管場所の一覧が空なら、登録済みカードの値から作る
+  if(!S.locations.length){
+    const found = [...new Set(cards.map(c => c.location).filter(Boolean))].sort();
+    if(found.length) S.locations = found;
+  }
+
   bind(); refreshOptions(); renderList(); renderQuota();
   setInterval(renderQuota, 60000);   // 残り時間を毎分更新する
 
