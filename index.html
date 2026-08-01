@@ -441,14 +441,18 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
     <div class="quotaWarn hide" id="setQuota" style="margin-top:12px"></div>
 
     <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
-    <div class="row one">
+    <label class="chk"><input type="checkbox" id="px-ai">相場調べにAIを使う（Gemini の課金が必要）</label>
+    <div class="row one hide" id="pxModelRow" style="margin-top:10px">
       <div class="f"><label>相場調べに使うモデル</label><select id="px-model"></select></div>
     </div>
-    <p class="note" style="margin-top:6px">
-      相場調べは Google検索が必要なため <b>Gemini 専用</b>です。上の「使用するAI」で Claude を選んでいても、
-      ここで指定したモデルと Gemini のキーを使います。<br>
-      <b style="color:var(--warn)">Gemini 3.x 系は無料枠では検索が使えません。</b>
-      無料のまま相場調べを使うなら 2.5 系を選んでください。</p>
+    <p class="note" style="margin-top:8px">
+      <b>オフのままで問題ありません。</b>カード詳細から eBay の落札価格を直接調べて、
+      その場で記録できます。無料で、AIの推定ではなく<b>実際の取引額</b>を確認できます。<br><br>
+      <span style="color:var(--dim)">
+      AIに調べさせる場合は Google検索が必要で、これは Gemini の無料枠では使えません
+      （検索が使えた 2.5 系は新規プロジェクトへの提供が終了しました）。
+      課金すると1枚あたり約2円、検索は月5,000回まで無料です。
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">課金の設定 ↗</a></span></p>
     <p class="note" style="margin-top:10px">
       キーは<b>このiPhoneのブラウザ内だけ</b>に保存され、GitHubには一切送られません。<br>
       通信はブラウザから各社APIへ直接行われ、写真や情報が私や第三者に渡ることはありません。<br><br>
@@ -766,8 +770,11 @@ const S = {
   get aiKeys(){ try { return JSON.parse(localStorage.getItem("cv.aiKeys") || "{}"); } catch { return {}; } },
   set aiKeys(v){ localStorage.setItem("cv.aiKeys", JSON.stringify(v)); },
   // 相場調べは検索が必要なので Gemini 固定。読み取りとは別に選ぶ。
-  get pxModel(){ return localStorage.getItem("cv.pxModel") || "gemini-2.5-flash"; },
+  get pxModel(){ return localStorage.getItem("cv.pxModel") || "gemini-3.6-flash"; },
   set pxModel(v){ localStorage.setItem("cv.pxModel", v); },
+  // AIでの相場調べは Gemini の課金が必要なため、既定はオフ
+  get pxAI(){ return localStorage.getItem("cv.pxAI") === "1"; },
+  set pxAI(v){ localStorage.setItem("cv.pxAI", v ? "1" : "0"); },
   get locations(){ try { return JSON.parse(localStorage.getItem("cv.locations") || "[]"); } catch { return []; } },
   set locations(v){ localStorage.setItem("cv.locations", JSON.stringify([...new Set(v.filter(Boolean))])); },
   get view(){ return localStorage.getItem("cv.view") === "list" ? "list" : "grid"; },
@@ -800,12 +807,12 @@ const keyFor = prov => (S.aiKeys || {})[prov] || "";
 /** 読み取りが使える状態か */
 const aiReady = () => !!(S.aiProv && keyFor(S.aiProv));
 
-/** 相場調べに使えるモデル（Google検索グラウンディングが必要） */
+/** 相場調べに使えるモデル（Google検索グラウンディングが必要）
+ *  2.5 系は新規プロジェクトに提供されず 2026-10-16 に停止予定のため載せない。 */
 const PX_MODELS = [
-  ["gemini-2.5-flash",      "2.5 Flash — 無料枠で検索が使える（推奨）"],
-  ["gemini-2.5-flash-lite", "2.5 Flash-Lite — 無料枠で検索が使える"],
-  ["gemini-3.6-flash",      "3.6 Flash — 高精度（検索は有料のみ）"],
-  ["gemini-3.5-flash",      "3.5 Flash — 高精度（検索は有料のみ）"]
+  ["gemini-3.6-flash",      "3.6 Flash — 推奨"],
+  ["gemini-3.5-flash",      "3.5 Flash"],
+  ["gemini-3.5-flash-lite", "3.5 Flash-Lite — 低コスト"]
 ];
 
 const AI_MODELS = {
@@ -813,9 +820,7 @@ const AI_MODELS = {
     ["gemini-3.6-flash",      "3.6 Flash — 最新・推奨"],
     ["gemini-3.5-flash",      "3.5 Flash — 高精度"],
     ["gemini-3.5-flash-lite", "3.5 Flash-Lite — 高速・低コスト"],
-    ["gemini-3.1-flash-lite", "3.1 Flash-Lite — 高速・低コスト"],
-    ["gemini-2.5-flash",      "2.5 Flash — 旧世代"],
-    ["gemini-2.5-flash-lite", "2.5 Flash-Lite — 旧世代"]
+    ["gemini-3.1-flash-lite", "3.1 Flash-Lite — 高速・低コスト"]
   ],
   claude: [
     ["claude-haiku-4-5-20251001", "Haiku 4.5 — 安価（推奨）"],
@@ -1724,6 +1729,7 @@ function testErr(e){
   if(/API key not valid|invalid x-api-key|authentication|401/i.test(m)) return "APIキーが正しくありません";
   if(/credit balance|billing|payment/i.test(m))                         return "残高が不足しています";
   if(QUOTA_RE.test(m))                                                  return "利用上限に達しています";
+  if(/no longer available to new users/i.test(m))                       return "このモデルは新規ユーザーには提供されていません";
   if(/not found|does not exist|404/i.test(m))                           return "そのモデルは利用できません";
   if(/Failed to fetch|NetworkError/i.test(m))                           return "通信できませんでした";
   if(/tool|search|not supported|not available/i.test(m))                return "このモデルでは検索が使えません";
@@ -1765,17 +1771,17 @@ async function testAI(){
   } else lines.push("－ Claude：キー未入力");
 
   // 相場調べは検索が必要。無料枠では 3.x 系が使えないため、ここで先に分かるようにする。
-  if(gk){
+  if(gk && $("#px-ai").checked){
     btn.innerHTML = `<i class="spin"></i>相場調べを確認中…`;
     try {
       await callGeminiSearch("今日の日付を一言で答えてください。", gk, pMod);
       lines.push(`✓ 相場調べ（Google検索）：OK\n　（${pMod}）`);
     }catch(e){
-      const hint = /^gemini-3/.test(pMod)
-        ? "\n　→ 無料枠では 3.x 系の検索は使えません。\n　　 2.5 Flash に変えてお試しください。" : "";
+      const hint = "\n　→ 相場調べには Gemini の課金有効化が必要です。\n　　 無料のままなら、カード詳細の eBay 落札価格リンクをご利用ください。";
       lines.push(`✗ 相場調べ（Google検索）：${testErr(e)}\n　（${pMod}）${hint}`);
     }
-  } else lines.push("－ 相場調べ：Gemini のキーが必要です");
+  } else if(!$("#px-ai").checked) lines.push("－ 相場調べ：AIを使わない設定です\n　（詳細画面のリンクから手動で記録できます）");
+  else lines.push("－ 相場調べ：Gemini のキーが必要です");
 
   btn.disabled = false; btn.textContent = "接続テスト";
   alert("接続テストの結果\n\n" + lines.join("\n\n"));
@@ -2267,8 +2273,10 @@ async function runPriceLookup(cardId){
     console.error(e);
     let m = e.message || "";
     if(/API key not valid/i.test(m))                  m = "Gemini のAPIキーが正しくありません";
-    else if(/not supported|not available|tool/i.test(m) && /^gemini-3/.test(S.pxModel))
-      m = `${S.pxModel} は無料枠では検索が使えません。\n\n設定タブの「相場調べに使うモデル」を\n2.5 Flash に変えてお試しください。`;
+    else if(/not supported|not available|tool|no longer available/i.test(m))
+      m = "相場調べ（Google検索）には Gemini の課金有効化が必要です。\n\n" +
+          "無料枠では検索が使えません。\n" +
+          "課金せずに調べる場合は、この画面の下にある\n「eBay 落札価格」リンクをご利用ください。";
     else if(QUOTA_RE.test(m)){ noteQuotaHit("gemini"); m = `Gemini の利用上限に達しました。\n回復まで ${quotaResetText().text}`; }
     else if(/Failed to fetch/i.test(m))               m = "通信できませんでした";
     else if(/JSON|Unexpected/i.test(m))               m = "結果を読み取れませんでした。もう一度お試しください";
@@ -2340,6 +2348,34 @@ async function savePriceResult(){
   renderList();
   openDetail(cardId);
   toast("相場を記録しました");
+}
+
+/** 詳細画面から相場を1タップで記録する */
+async function quickSavePrice(cardId){
+  const c = cards.find(x => x.id === cardId); if(!c) return;
+  const raw = $("#qpPrice").value.trim();
+  if(raw === ""){ toast("金額を入力してください"); $("#qpPrice").focus(); return; }
+  const v = Number(raw);
+  if(!isFinite(v) || v < 0){ toast("金額が正しくありません"); return; }
+
+  const cur = $("#qpCur").value;
+  const prev = c.marketPrice;
+
+  c.marketPrice = v;
+  c.marketCurrency = cur;
+  c.marketUpdatedAt = Date.now();
+  c.updatedAt = Date.now();
+  c.priceHistory = (c.priceHistory || []).concat([{
+    date: new Date().toISOString().slice(0, 10),
+    price: v, currency: cur, source: "手動"
+  }]);
+
+  await dbPut("cards", c);
+  markDirty();
+  renderList();
+  openDetail(cardId);   // 更新後の表示に差し替える
+  const mark = cur === "USD" ? "$" : "¥";
+  toast(prev ? `${mark}${v.toLocaleString()} に更新しました` : `${mark}${v.toLocaleString()} を記録しました`);
 }
 
 /** 相場の鮮度 */
@@ -2414,24 +2450,41 @@ async function openDetail(id){
       ${c.purchasePrice ? `<div class="k" style="margin-top:6px">取得原価 ${yen(toJPY(c.purchasePrice, c.purchaseCurrency))} → 評価 ${yen(marketJPY(c))}</div>` : ""}
       </div>` : ""}
 
-    <fieldset><legend>相場を調べる</legend>
-      <button class="aibtn" id="pxRun" type="button">✨ AIで相場を調べる</button>
-      <p class="note" style="margin-top:8px">
-        Googleで実際に検索し、eBayの落札価格などを根拠に推定します（引用元URL付き）。<br>
-        <b>推定値であり、実売価格そのものではありません。</b>必ず引用元を確認してください。</p>
-      <div id="pxPanel"></div>
-
-      <div class="links" style="margin-top:14px">
+    <fieldset><legend>相場を調べて記録する</legend>
+      <div class="links">
       ${marketLinks(c).map(l => `<a class="lk" href="${l.u}" target="_blank" rel="noopener">
         <b>${l.t}</b><span>${l.s} ↗</span></a>`).join("")}
       </div>
-      <p class="note" style="margin-top:10px">自分で調べた額は「編集」→ 相場欄に入れると履歴として残ります。</p></fieldset>
+
+      <div class="row" style="margin-top:14px;grid-template-columns:1fr 88px">
+        <div class="f"><label>調べた相場</label>
+          <input type="number" id="qpPrice" inputmode="decimal" step="0.01"
+            placeholder="${c.marketPrice ?? "例 25000"}"></div>
+        <div class="f"><label>通貨</label><select id="qpCur">
+          <option>JPY</option><option>USD</option></select></div>
+      </div>
+      <button class="btn" id="qpSave" type="button" style="width:100%;margin-top:10px">この額を記録</button>
+      <p class="note" style="margin-top:8px">
+        上のリンクで調べた額をそのまま入れてください。履歴として残り、推移を追えます。</p>
+
+      ${S.pxAI ? `<hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+        <button class="aibtn" id="pxRun" type="button">✨ AIで相場を調べる</button>
+        <p class="note" style="margin-top:8px">
+          Googleで検索し、落札価格などを根拠に推定します（引用元URL付き）。<br>
+          <b>推定値であり、実売価格そのものではありません。</b></p>
+        <div id="pxPanel"></div>` : ""}
+    </fieldset>
 
     ${hist ? `<fieldset><legend>相場の履歴</legend>${hist}</fieldset>` : ""}
     <fieldset><legend>登録情報</legend><table class="kv">${kv}</table></fieldset>`;
 
   priceResult = null;
-  $("#pxRun").onclick = () => runPriceLookup(id);
+  if($("#pxRun")) $("#pxRun").onclick = () => runPriceLookup(id);
+
+  // 詳細画面から直接、相場を記録できるようにする
+  $("#qpCur").value = c.marketCurrency || "JPY";
+  $("#qpSave").onclick = () => quickSavePrice(id);
+  $("#qpPrice").onkeydown = e => { if(e.key === "Enter") quickSavePrice(id); };
 
   $("#ovView").classList.add("on");
   document.body.style.overflow = "hidden";
@@ -3123,6 +3176,9 @@ function bind(){
   $("#ai-key-claude").value = keyFor("claude");
   $("#px-model").innerHTML = PX_MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
   $("#px-model").value = S.pxModel;
+  $("#px-ai").checked = S.pxAI;
+  $("#pxModelRow").classList.toggle("hide", !S.pxAI);
+  $("#px-ai").onchange = () => $("#pxModelRow").classList.toggle("hide", !$("#px-ai").checked);
   $("#ai-prov").onchange = fillModelSelect;
   $("#aiTest").onclick = testAI;
   $("#aiSave").onclick = () => {
@@ -3131,6 +3187,7 @@ function bind(){
     S.aiKeys  = { gemini: $("#ai-key-gemini").value.trim(),
                   claude: $("#ai-key-claude").value.trim() };
     S.pxModel = $("#px-model").value;
+    S.pxAI    = $("#px-ai").checked;
     toast(aiReady() ? "保存しました" : "AI読み取りをオフにしました");
   };
 
@@ -3225,6 +3282,9 @@ function bind(){
     S.quotaMap = { gemini: S.quotaAt };
     localStorage.removeItem("cv.quotaAt");
   }
+  // 提供終了した 2.5 系を選んだままなら現行モデルへ寄せる
+  if(/^gemini-2\.5/.test(S.pxModel)) S.pxModel = "gemini-3.6-flash";
+  if(/^gemini-2\.5/.test(S.aiModel)) S.aiModel = "gemini-3.6-flash";
   // 保管場所の一覧が空なら、登録済みカードの値から作る
   if(!S.locations.length){
     const found = [...new Set(cards.map(c => c.location).filter(Boolean))].sort();
