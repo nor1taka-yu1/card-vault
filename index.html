@@ -194,6 +194,9 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 .aibtn{width:100%;padding:12px;background:linear-gradient(135deg,#2d6fbf,#4ea1ff);
   border:0;border-radius:var(--r);color:#fff;font-size:13.5px;font-weight:700}
 .aibtn:disabled{opacity:.45}
+.quotaWarn{padding:11px 13px;border-radius:var(--r);background:rgba(245,165,36,.1);
+  border:1px solid rgba(245,165,36,.4);font-size:12.5px;line-height:1.75;color:var(--fg)}
+.quotaWarn b{color:var(--warn)}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
   border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -419,6 +422,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
       <button class="btn ghost" id="aiTest">接続テスト</button>
       <button class="btn" id="aiSave">保存</button>
     </div>
+    <div class="quotaWarn hide" id="setQuota" style="margin-top:12px"></div>
     <p class="note" style="margin-top:10px">
       キーは<b>このiPhoneのブラウザ内だけ</b>に保存され、GitHubには一切送られません。<br>
       通信はブラウザから各社APIへ直接行われ、写真や情報が私や第三者に渡ることはありません。<br><br>
@@ -476,6 +480,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
     </div>
     <p class="note">写真は自動で圧縮して保存します（長辺1400px）。裏面は型番・シリアルの確認用です。</p>
 
+    <div class="quotaWarn hide" id="aiQuota"></div>
     <button class="aibtn" id="aiRun">✨ 写真からカード情報を読み取る</button>
     <p class="note hide" id="aiHint">読み取りを使うには、設定タブでAPIキーを登録してください。</p>
 
@@ -589,6 +594,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
           シリアルやカード番号は裏面にあることが多いので、精度を求めるならペア推奨です。</p>
       </fieldset>
 
+      <div class="quotaWarn hide" id="bkQuota"></div>
       <div class="nextshot" id="bkNextShot"></div>
 
       <div class="row" style="margin-top:10px">
@@ -739,7 +745,9 @@ const S = {
   get gdPendImg(){ try { return JSON.parse(localStorage.getItem("cv.gdPendImg") || "[]"); } catch { return []; } },
   set gdPendImg(v){ localStorage.setItem("cv.gdPendImg", JSON.stringify([...new Set(v)])); },
   get gdDirty(){ return localStorage.getItem("cv.gdDirty") === "1"; },
-  set gdDirty(v){ localStorage.setItem("cv.gdDirty", v ? "1" : "0"); }
+  set gdDirty(v){ localStorage.setItem("cv.gdDirty", v ? "1" : "0"); },
+  get quotaAt(){ return +(localStorage.getItem("cv.quotaAt") || 0); },
+  set quotaAt(v){ localStorage.setItem("cv.quotaAt", v); }
 };
 
 const AI_MODELS = {
@@ -1141,6 +1149,7 @@ async function openEditor(card){
   const aiOn = !!(S.aiProv && S.aiKey);
   $("#aiRun").classList.toggle("hide", !aiOn);
   $("#aiHint").classList.toggle("hide", aiOn);
+  renderQuota();
 
   $("#ovEdit").classList.add("on");
   document.body.style.overflow = "hidden";
@@ -1349,6 +1358,58 @@ const AI_FIELDS = [
   ["isRookie","ルーキー","#e-rc"], ["isAuto","直筆サイン","#e-auto"], ["isMem","ジャージ/パッチ","#e-mem"]
 ];
 
+/* --- 利用上限（クォータ）------------------------------------------------------
+   Gemini の1日あたりの上限は「米国太平洋時間の午前0時」に回復する。
+   日本時間だと夏時間は16:00、冬時間は17:00にあたる。
+   ---------------------------------------------------------------------------- */
+const QUOTA_RE = /quota|RESOURCE_EXHAUSTED|rate.?limit|\b429\b|exceeded/i;
+
+/** 次に上限が回復する時刻 */
+function nextQuotaReset(now = new Date()){
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone:"America/Los_Angeles",
+      year:"numeric", month:"2-digit", day:"2-digit",
+      hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false })
+    .formatToParts(now).filter(x => x.type !== "literal").map(x => [x.type, x.value]));
+  const laNow = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+  const laMid = Date.UTC(+p.year, +p.month - 1, +p.day) + 86400000;
+  return new Date(now.getTime() + (laMid - laNow));
+}
+
+/** 「あと約2時間48分（16:00頃）」の形にする */
+function quotaResetText(){
+  const d  = nextQuotaReset();
+  const ms = d - Date.now();
+  const h  = Math.floor(ms / 3600000);
+  const m  = Math.ceil((ms % 3600000) / 60000);
+  const at = d.toLocaleTimeString("ja-JP", { hour:"2-digit", minute:"2-digit" });
+  return { ms, at, text: `あと約 ${h ? h + "時間" : ""}${m}分（${at}頃）` };
+}
+
+function noteQuotaHit(){ S.quotaAt = Date.now(); renderQuota(); }
+
+/** 上限に当たっているときだけ、残り時間を各画面に出す */
+function renderQuota(){
+  const on = quotaBlocked();
+  const q  = on ? quotaResetText() : null;
+  const html = on
+    ? `<b>⏳ AIの1日あたりの上限に達しています</b><br>` +
+      `回復まで <b>${q.text}</b><br>` +
+      `<span style="color:var(--dim)">Google の仕様で米国太平洋時間の午前0時に回復します。` +
+      `写真の撮影と手入力での登録は、いま行えます。</span>`
+    : "";
+  ["#aiQuota", "#bkQuota", "#setQuota"].forEach(sel => {
+    const el = $(sel); if(!el) return;
+    el.innerHTML = html;
+    el.classList.toggle("hide", !on);
+  });
+}
+
+/** 上限に当たった状態が続いているか */
+function quotaBlocked(){
+  return S.quotaAt > 0 && Date.now() < +nextQuotaReset(new Date(S.quotaAt));
+}
+
 const blobToB64 = async b => (await blobToDataURL(b)).split(",")[1];
 
 /** 編集画面に今ある画像を base64 で取り出す。
@@ -1439,9 +1500,15 @@ async function runAI(){
     console.error(err);
     let m = err.message || "読み取りに失敗しました";
     if(/API key not valid|invalid x-api-key|authentication/i.test(m)) m = "APIキーが正しくありません";
-    else if(/quota|RESOURCE_EXHAUSTED|rate_limit/i.test(m))          m = "利用上限に達しました。時間をおいてください";
-    else if(/credit balance|billing/i.test(m))                        m = "APIの残高が不足しています";
-    else if(/Failed to fetch|NetworkError/i.test(m))                  m = "通信できませんでした。電波とキーをご確認ください";
+    else if(QUOTA_RE.test(m)){
+      noteQuotaHit();
+      const q = quotaResetText();
+      m = `AIの利用上限に達しました。\n\n回復まで ${q.text}\n` +
+          "（Google の仕様で、米国太平洋時間の午前0時に回復します）\n\n" +
+          "急ぐ場合は、設定タブでモデルを Flash-Lite に変えると\n1日の上限が緩和されることがあります。";
+    }
+    else if(/credit balance|billing/i.test(m))       m = "APIの残高が不足しています";
+    else if(/Failed to fetch|NetworkError/i.test(m)) m = "通信できませんでした。電波とキーをご確認ください";
     alert("読み取りエラー\n\n" + m);
   }finally{
     btn.disabled = false;
@@ -1696,7 +1763,7 @@ async function bulkRun(){
 
   const model = S.aiModel || AI_MODELS[S.aiProv]?.[0]?.[0];
   const total = bulk.items.length;
-  let done = 0, ok = 0, ng = 0;
+  let done = 0, ok = 0, ng = 0, quotaStopped = false;
 
   const log = m => { $("#bkLog").innerHTML = m + "<br>" + $("#bkLog").innerHTML.split("<br>").slice(0, 6).join("<br>"); };
 
@@ -1740,11 +1807,23 @@ async function bulkRun(){
         break;
       }catch(e){
         const m = e.message || "";
-        if(attempt === 0 && /quota|RESOURCE_EXHAUSTED|rate.?limit|429|overloaded/i.test(m)){
+        const isQuota = QUOTA_RE.test(m);
+        // 1回目は「1分あたりの上限」かもしれないので30秒待って試す
+        if(attempt === 0 && (isQuota || /overloaded/i.test(m))){
           attempt++;
-          $("#bkSub").textContent = "利用上限のため30秒待っています…";
-          for(let w = 30; w > 0 && !bulk.abort; w--){ $("#bkSub").textContent = `利用上限のため待機中… ${w}秒`; await sleep(1000); }
+          for(let w = 30; w > 0 && !bulk.abort; w--){
+            $("#bkSub").textContent = `混雑のため待機中… ${w}秒`; await sleep(1000);
+          }
           continue;
+        }
+        // 2回目も上限なら「1日あたりの上限」。以降も必ず失敗するので中断する。
+        if(isQuota){
+          noteQuotaHit();
+          quotaStopped = true;
+          bulk.abort = true;
+          it.status = "err"; it.error = "利用上限"; it.data = normalizeAI({});
+          ng++;
+          break;
         }
         it.status = "err"; it.error = m.slice(0, 60); it.data = normalizeAI({});
         ng++; log(`${done}枚目：<span style="color:var(--bad)">失敗</span>`);
@@ -1764,7 +1843,19 @@ async function bulkRun(){
   bulk.items = bulk.items.filter(i => i.status !== "wait" || !bulk.abort);
   bulkRenderReview();
   bulkStage(3);
-  toast(`読み取り完了：成功 ${ok} 件${ng ? ` / 失敗 ${ng} 件` : ""}`);
+
+  if(quotaStopped){
+    const q = quotaResetText();
+    alert(
+      "AIの1日あたりの利用上限に達しました。\n\n" +
+      `読み取り済み：${ok} 件\n未読み取り：${total - done} 件\n\n` +
+      `上限の回復まで ${q.text}\n` +
+      "（Google の仕様で、米国太平洋時間の午前0時に回復します）\n\n" +
+      "撮影した写真は残っています。このまま「登録」すれば写真だけ先に保存でき、\n" +
+      "カード情報は後から手入力またはAIで追加できます。");
+  }else{
+    toast(`読み取り完了：成功 ${ok} 件${ng ? ` / 失敗 ${ng} 件` : ""}`);
+  }
 }
 
 function bulkRenderReview(){
@@ -2738,7 +2829,7 @@ function bind(){
     $$(".tab").forEach(x => x.classList.remove("on")); t.classList.add("on");
     ["collection","stats","settings"].forEach(v => $("#v-" + v).classList.toggle("hide", v !== t.dataset.view));
     if(t.dataset.view === "stats") renderStats();
-    if(t.dataset.view === "settings"){ showQuota(); renderSettingsSync(); }
+    if(t.dataset.view === "settings"){ showQuota(); renderSettingsSync(); renderQuota(); }
     scrollTo(0, 0);
   });
 
@@ -2794,6 +2885,7 @@ function bind(){
   // 一括登録
   $("#btnBulk").onclick = () => {
     bulkReset();
+    renderQuota();
     $("#ovBulk").classList.add("on");
     document.body.style.overflow = "hidden";
   };
@@ -2898,7 +2990,8 @@ function bind(){
   }
   cards = await dbAll("cards");
   cards.sort((a, b) => b.createdAt - a.createdAt);
-  bind(); refreshOptions(); renderList();
+  bind(); refreshOptions(); renderList(); renderQuota();
+  setInterval(renderQuota, 60000);   // 残り時間を毎分更新する
 
   // ホーム画面に追加したときの名前
   const manifest = { name:"Card Vault", short_name:"CardVault", start_url:".",
