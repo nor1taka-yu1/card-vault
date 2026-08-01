@@ -203,6 +203,8 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 .locn{font-size:11px;color:var(--dim);white-space:nowrap}
 .locdel{background:transparent;border:1px solid var(--line);color:var(--bad);
   font-size:11px;padding:4px 9px;border-radius:6px}
+.locedit{background:transparent;border:1px solid var(--line);color:var(--accent);
+  font-size:11px;padding:4px 9px;border-radius:6px}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.35);
   border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:7px}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -916,10 +918,14 @@ function renderLocList(){
     : list.map(v => `<div class="locrow">
         <span class="locname">${esc(v)}</span>
         <span class="locn">${used.get(v) || 0} 枚</span>
+        <button class="locedit" data-edit="${esc(v)}" type="button">名前変更</button>
         <button class="locdel" data-loc="${esc(v)}" type="button">削除</button>
       </div>`).join("");
 
   box.onclick = e => {
+    const ren = e.target.dataset?.edit;
+    if(ren !== undefined) return renameLocation(ren);
+
     const v = e.target.dataset?.loc; if(v === undefined) return;
     const n = used.get(v) || 0;
     if(n && !confirm(`「${v}」は ${n} 枚のカードで使われています。\n一覧からは消しますが、カード側の記録はそのまま残ります。\n\n削除しますか？`)) return;
@@ -928,6 +934,35 @@ function renderLocList(){
     ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
     toast("削除しました");
   };
+}
+
+/** 保管場所の名前を変更し、使用中のカードもまとめて追従させる */
+async function renameLocation(oldName){
+  const input = prompt("保管場所の新しい名前", oldName);
+  if(input === null) return;
+  const nv = input.trim();
+  if(!nv || nv === oldName) return;
+
+  const list = S.locations;
+  const merging = list.includes(nv);
+  const targets = cards.filter(c => c.location === oldName);
+
+  const msg = merging
+    ? `「${nv}」は既に存在します。\n\n「${oldName}」(${targets.length}枚) を「${nv}」に統合しますか？`
+    : `「${oldName}」を「${nv}」に変更します。\n\n使用中の ${targets.length} 枚のカードも新しい名前に変わります。`;
+  if(!confirm(msg)) return;
+
+  const now = Date.now();
+  for(const c of targets){ c.location = nv; c.updatedAt = now; await dbPut("cards", c); }
+  S.locations = merging ? list.filter(x => x !== oldName)
+                        : list.map(x => x === oldName ? nv : x);
+
+  markDirty();
+  renderLocList();
+  ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
+  refreshOptions(); renderList();
+  toast(merging ? `${targets.length} 枚を「${nv}」に統合しました`
+                : `「${nv}」に変更しました（${targets.length} 枚）`);
 }
 
 /** カード名の組み立て（検索クエリにも使う） */
@@ -1174,6 +1209,13 @@ function renderStats(){
   const priced = live.filter(c => marketJPY(c) > 0).length;
   const graded = live.filter(c => c.gradeCompany).length;
 
+  // 特徴のあるカードの枚数（枚数ベース。複数枚所持は合算）
+  const attr = fn => live.reduce((s, c) => s + (fn(c) ? (c.quantity || 1) : 0), 0);
+  const nRookie = attr(c => c.isRookie);
+  const nAuto   = attr(c => c.isAuto);
+  const nMem    = attr(c => c.isMem);
+  const pct = n => qty ? ` <span style="font-size:12px;color:var(--dim)">${(n / qty * 100).toFixed(0)}%</span>` : "";
+
   const bars = (title, map, unit) => {
     const arr = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
     if(!arr.length) return "";
@@ -1210,11 +1252,22 @@ function renderStats(){
       <div class="kpi"><div class="k">相場を入力済み</div><div class="v">${priced}<span style="font-size:13px;color:var(--dim)"> / ${live.length}</span></div></div>
     </div>
     ${priced < live.length ? `<p class="note" style="margin-top:12px">相場が未入力のカードが ${live.length - priced} 件あります。合計額はその分だけ実際より低く出ます。</p>` : ""}
+
+    <h3 class="sec">特徴別の枚数</h3>
+    <div class="kpis" style="margin-top:8px">
+      <div class="kpi"><div class="k">ルーキー</div><div class="v" style="color:#ff7a9a">${nRookie}${pct(nRookie)}</div></div>
+      <div class="kpi"><div class="k">直筆サイン</div><div class="v" style="color:#4ec9ff">${nAuto}${pct(nAuto)}</div></div>
+      <div class="kpi"><div class="k">ジャージ / パッチ</div><div class="v" style="color:#b98cff">${nMem}${pct(nMem)}</div></div>
+    </div>
+
     ${bars("選手別 保有枚数", tally(c => tidyName(c.player)), "n")}
     ${bars("選手別 評価額", valueByPlayer, "yen")}
+    ${bars("商品名別", tally(c => c.product), "n")}
     ${bars("メーカー別", tally(c => c.brand), "n")}
     ${bars("年 / シーズン別", tally(c => c.year), "n")}
     ${bars("チーム別", tally(c => tidyName(c.team)), "n")}
+    ${bars("国籍別", tally(c => tidyName(c.nationality)), "n")}
+    ${bars("購入元別", tally(c => c.purchaseSource), "n")}
     ${bars("保管場所別", tally(c => c.location), "n")}
     <p class="note" style="margin-top:24px">USD建ての金額は 1USD=${S.rate}円 で換算しています（設定タブで変更可）。</p>`;
 }
