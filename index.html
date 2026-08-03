@@ -484,7 +484,8 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
   </fieldset>
 
   <fieldset style="margin-top:14px"><legend>保管場所の管理</legend>
-    <p class="note">ここに登録した場所が、カード登録画面のプルダウンに並びます。</p>
+    <p class="note">ここに登録した場所が、カード登録画面のプルダウンに並びます。<br>
+      この一覧と為替レートは<b>端末間で同期されます</b>（APIキーと表示形式は端末ごとの設定です）。</p>
     <div id="locList" style="margin-top:10px"></div>
     <div class="row" style="margin-top:10px;grid-template-columns:1fr auto">
       <input id="locNew" placeholder="例：バインダーA / ファイルB / 保管庫" autocomplete="off"
@@ -792,6 +793,9 @@ const S = {
   set pxAI(v){ localStorage.setItem("cv.pxAI", v ? "1" : "0"); },
   get locations(){ try { return JSON.parse(localStorage.getItem("cv.locations") || "[]"); } catch { return []; } },
   set locations(v){ localStorage.setItem("cv.locations", JSON.stringify([...new Set(v.filter(Boolean))])); },
+  // 端末間で共有する設定の更新時刻
+  get settingsAt(){ return +(localStorage.getItem("cv.settingsAt") || 0); },
+  set settingsAt(v){ localStorage.setItem("cv.settingsAt", v); },
   get view(){ return localStorage.getItem("cv.view") === "list" ? "list" : "grid"; },
   set view(v){ localStorage.setItem("cv.view", v); },
 
@@ -956,6 +960,7 @@ function renderLocList(){
     const n = used.get(v) || 0;
     if(n && !confirm(`「${v}」は ${n} 枚のカードで使われています。\n一覧からは消しますが、カード側の記録はそのまま残ります。\n\n削除しますか？`)) return;
     S.locations = S.locations.filter(x => x !== v);
+    touchSettings();
     renderLocList();
     ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
     toast("削除しました");
@@ -982,8 +987,7 @@ async function renameLocation(oldName){
   for(const c of targets){ c.location = nv; c.updatedAt = now; await dbPut("cards", c); }
   S.locations = merging ? list.filter(x => x !== oldName)
                         : list.map(x => x === oldName ? nv : x);
-
-  markDirty();
+  touchSettings();
   renderLocList();
   ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
   refreshOptions(); renderList();
@@ -2848,6 +2852,39 @@ async function driveDelete(fileId){
    削除は「いつ消したか」を記録して同期し、消したカードが復活しないようにする。
    ---------------------------------------------------------------------------- */
 
+/* --- 端末間で共有する設定 ----------------------------------------------------
+   保管場所と為替レートは「データの一部」なので同期する。
+   APIキーは端末内に留め、表示形式は端末ごとの好みなので同期しない。
+   ---------------------------------------------------------------------------- */
+
+const sharedSettings = () => ({ locations: S.locations, rate: S.rate });
+
+/** 共有設定を変更したときに呼ぶ */
+function touchSettings(){
+  S.settingsAt = Date.now();
+  markDirty();
+}
+
+/** カードが使っている保管場所が一覧から抜け落ちないよう補う */
+function ensureUsedLocations(){
+  const list = S.locations;
+  const used = [...new Set(cards.map(c => c.location).filter(Boolean))];
+  const add = used.filter(v => !list.includes(v));
+  if(add.length) S.locations = [...list, ...add];
+}
+
+/** クラウド側の設定が新しければ取り込む */
+function mergeSettings(cs, cloudAt){
+  if(!cs || !((cloudAt || 0) > S.settingsAt)) return false;
+  if(Array.isArray(cs.locations)) S.locations = cs.locations;
+  if(cs.rate) S.rate = cs.rate;
+  S.settingsAt = cloudAt;
+  ensureUsedLocations();
+  ["#e-loc", "#bk-loc"].forEach(s => { if($(s)) fillLocSelect(s); });
+  renderLocList();
+  return true;
+}
+
 /** クラウドの内容を取り込んで統合する。戻り値は変更の内訳。 */
 async function mergeCloud(cloudCards, cloudDeleted){
   // 削除記録は両者を合わせる
@@ -2944,16 +2981,19 @@ async function syncPush(manual){
       syncBadge("⟳ 他端末の変更を取り込み中");
       const cloud = await (await dreq(
         `https://www.googleapis.com/drive/v3/files/${S.gdMetaFile}?alt=media`)).json();
+      const setChanged = mergeSettings(cloud.settings, cloud.settingsAt);
       if(Array.isArray(cloud.cards)){
         const r = await mergeCloud(cloud.cards, cloud.deleted);
         if(r.added.length) await fetchImagesFor(r.added,
           (i, t) => syncBadge(`⟳ 取り込み中 ${i}/${t}`));
         if(r.added.length || r.updated.length || r.removed.length){
           mergeNote = `他の端末の変更を取り込みました\n` +
-            `　追加 ${r.added.length} 件 ／ 更新 ${r.updated.length} 件 ／ 削除 ${r.removed.length} 件`;
+            `　追加 ${r.added.length} 件 ／ 更新 ${r.updated.length} 件 ／ 削除 ${r.removed.length} 件` +
+            (setChanged ? `\n　保管場所・為替レートの設定も更新しました` : "");
           refreshOptions(); renderList();
         }
       }
+      if(setChanged && !mergeNote) mergeNote = "他の端末の設定（保管場所・為替レート）を取り込みました";
     }
 
     // 1. 写真を送る
@@ -2996,7 +3036,8 @@ async function syncPush(manual){
     syncBadge("⟳ カード情報を送信中");
     const slim = cards.map(({ thumb, ...rest }) => rest);
     const payload = { app:"cardvault", version:1, savedAt:new Date().toISOString(),
-                      rate:S.rate, cards:slim, deleted:S.gdDeleted };
+                      rate:S.rate, cards:slim, deleted:S.gdDeleted,
+                      settings:sharedSettings(), settingsAt:S.settingsAt };
     const blob = new Blob([JSON.stringify(payload)], { type:"application/json" });
     const up = await driveUpload(DRIVE_META, blob, S.gdMetaFile, parent);
     S.gdMetaFile = up.id || up;
@@ -3074,12 +3115,20 @@ async function syncRestore(){
       await dbPut("cards", { ...c, thumb });
     }
     if(meta.rate) S.rate = meta.rate;
+    if(meta.settings){
+      if(Array.isArray(meta.settings.locations)) S.locations = meta.settings.locations;
+      if(meta.settings.rate) S.rate = meta.settings.rate;
+      S.settingsAt = meta.settingsAt || Date.now();
+    }
     S.gdMetaFile = metaFile.id;
     S.gdMetaTime = metaFile.modifiedTime || "";
     if(Array.isArray(meta.deleted)) S.gdDeleted = meta.deleted;
 
     cards = await dbAll("cards");
     cards.sort((a, b) => b.createdAt - a.createdAt);
+    ensureUsedLocations();
+    ["#e-loc", "#bk-loc"].forEach(x => { if($(x)) fillLocSelect(x); });
+    renderLocList();
     S.gdDirty = false; S.gdLast = Date.now();
     syncState = "idle"; syncBadge();
     refreshOptions(); limit = 60; renderList();
@@ -3462,6 +3511,7 @@ function bind(){
     if(!v) return toast("名前を入力してください");
     if(S.locations.includes(v)) return toast("すでに登録されています");
     S.locations = [...S.locations, v];
+    touchSettings();
     $("#locNew").value = "";
     renderLocList();
     ["#e-loc", "#bk-loc"].forEach(fillLocSelect);
@@ -3506,7 +3556,7 @@ function bind(){
   $("#expCsv").onclick  = exportCSV;
   $("#impJson").onchange = e => e.target.files[0] && importJSON(e.target.files[0]);
   $("#rate").value = S.rate;
-  $("#saveRate").onclick = () => { S.rate = +$("#rate").value || 155; toast("保存しました"); renderStats(); };
+  $("#saveRate").onclick = () => { S.rate = +$("#rate").value || 155; touchSettings(); toast("保存しました"); renderStats(); };
   $("#fixNames").onclick = unifyNames;
   $("#wipe").onclick = async () => {
     if(!confirm("この端末の全てのカードと写真を削除します。本当によろしいですか？")) return;
