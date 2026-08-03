@@ -256,6 +256,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
 .bkchk{flex:0 0 auto;display:flex;align-items:flex-start;padding-top:2px}
 .bkchk input{width:19px;height:19px;accent-color:var(--accent)}
 .bkerr{font-size:11px;color:var(--bad)}
+.bkdup{font-size:11px;color:var(--warn)}
 .empty{text-align:center;padding:70px 20px;color:var(--dim);font-size:13px;line-height:1.9}
 .note{font-size:11.5px;color:var(--dim);line-height:1.7}
 .more{width:100%;padding:13px;margin-top:14px;background:var(--panel);border:1px solid var(--line);
@@ -304,6 +305,13 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
         <option value="__graded">鑑定済みのみ</option>
       </select>
       <select id="f-tag"><option value="">タグ：全て</option></select>
+      <select id="f-special">
+        <option value="">要確認：なし</option>
+        <option value="dup">重複の可能性あり</option>
+        <option value="nomarket">相場が未設定</option>
+        <option value="nophoto">写真なし</option>
+        <option value="noinfo">選手名が未入力</option>
+      </select>
       <select id="f-sort">
         <option value="new">並替：追加が新しい順</option>
         <option value="old">並替：追加が古い順</option>
@@ -758,6 +766,7 @@ let editing = null;             // 編集中のカード
 let pendingImg = {front:null, back:null};   // {blob, thumb} 未保存の画像
 let viewingId = null;
 let limit = 60;                 // 段階描画
+const groupOpen = new Set();    // 展開中のグループ名
 
 const S = {
   get rate(){ return +(localStorage.getItem("cv.rate") || 155); },
@@ -965,6 +974,53 @@ async function renameLocation(oldName){
                 : `「${nv}」に変更しました（${targets.length} 枚）`);
 }
 
+/* --- 重複検出 ----------------------------------------------------------------
+   同じカードを二度登録してしまう事故は、枚数が増えるほど必ず起きる。
+   ただし「同じカードを複数枚所持」は正常なので、止めずに知らせるだけにする。
+   ---------------------------------------------------------------------------- */
+
+/** 同一カードとみなす照合キー */
+function dupKey(c){
+  return [c.player, c.year, c.brand, c.product, c.cardNo,
+          c.parallel, c.serial, c.gradeCompany, c.grade]
+    .map(v => nameKey(v)).join("|");
+}
+
+/** 同じ内容の既存カードを探す */
+function findDuplicates(c, excludeId){
+  const k = dupKey(c);
+  if(k.replace(/\|/g, "") === "") return [];      // 全部空なら判定しない
+  return cards.filter(x => x.id !== excludeId && dupKey(x) === k);
+}
+
+/** 重複の可能性があるキーの一覧 */
+function duplicateKeySet(){
+  const n = new Map();
+  cards.forEach(c => { const k = dupKey(c); if(k.replace(/\|/g, "")) n.set(k, (n.get(k) || 0) + 1); });
+  return new Set([...n.entries()].filter(([, v]) => v > 1).map(([k]) => k));
+}
+
+/** 保存前の確認。登録を続けてよければ true */
+function confirmDuplicate(c, excludeId){
+  const dups = findDuplicates(c, excludeId);
+  if(!dups.length) return true;
+
+  const name = [c.year, c.brand, c.product, c.player].filter(Boolean).join(" ");
+  if(c.serial){
+    // シリアル入りは1点物。同じ番号が既にあるなら二重登録の可能性が高い。
+    return confirm(
+      `⚠ シリアル ${c.serial} の同じカードが既に登録されています。\n\n${name}\n\n` +
+      `シリアル入りは1枚しか存在しないため、二重登録の可能性が高いです。\n\n` +
+      `それでも別の1枚として登録しますか？`);
+  }
+  const have = dups.reduce((s, x) => s + (x.quantity || 1), 0);
+  return confirm(
+    `同じ内容のカードを既に ${have} 枚登録しています。\n\n${name}\n\n` +
+    `別の1枚として登録しますか？\n` +
+    `（同じカードを複数所持している場合は「OK」。\n` +
+    `　間違いなら「キャンセル」して、既存カードの枚数を増やしてください）`);
+}
+
 /** カード名の組み立て（検索クエリにも使う） */
 function cardTitle(c){
   return [c.year, c.brand, c.product, c.parallel, c.player, c.cardNo]
@@ -1025,8 +1081,14 @@ function visibleCards(){
   const grade  = $("#f-grade").value;
   const tag    = $("#f-tag").value;
   const sort   = $("#f-sort").value;
+  const spec   = $("#f-special").value;
+  const dupSet = spec === "dup" ? duplicateKeySet() : null;
 
   let out = cards.filter(c => {
+    if(spec === "dup"      && !dupSet.has(dupKey(c))) return false;
+    if(spec === "nomarket" && c.marketPrice != null)  return false;
+    if(spec === "nophoto"  && c.thumb)                return false;
+    if(spec === "noinfo"   && String(c.player || "").trim()) return false;
     if(brand && c.brand !== brand) return false;
     if(year  && c.year  !== year)  return false;
     if(grade === "__raw"    && c.gradeCompany) return false;
@@ -1160,16 +1222,31 @@ function renderList(){
     }));
     const groups = [...g.values()]
       .sort((a, b) => b.items.length - a.items.length || a.label.localeCompare(b.label, "ja"));
-    html = groups.map(({ label, items }) => {
+
+    // グループごとに表示枚数を絞る。全件描くと1000枚で0.6秒かかり、
+    // 見出しを眺めたいだけのときに待たされるため。
+    const PER = S.view === "list" ? 6 : 8;
+    html = groups.map((grp, gi) => {
+      const { label, items } = grp;
       const qty = items.reduce((s, c) => s + (c.quantity || 1), 0);
       const mkt = items.reduce((s, c) => s + marketJPY(c) * (c.quantity || 1), 0);
+      const open = groupOpen.has(label);
+      const shown = open ? items : items.slice(0, PER);
+      const rest = items.length - shown.length;
       return `<div class="ghead"><div class="gname">${esc(label)}</div>
         <div class="gsub">${qty} 枚${mkt ? " ・ " + yen(mkt) : ""}</div></div>
-        ${wrapCards(items)}`;
+        ${wrapCards(shown)}
+        ${rest > 0 ? `<button class="more gmore" data-g="${esc(label)}">このグループの残り ${rest} 枚を表示</button>` : ""}
+        ${open && items.length > PER ? `<button class="more gmore" data-g="${esc(label)}">折りたたむ</button>` : ""}`;
     }).join("");
   }
   el.innerHTML = html;
   $("#more")?.addEventListener("click", () => { limit += 60; renderList(); });
+  el.querySelectorAll(".gmore").forEach(b => b.onclick = () => {
+    const g = b.dataset.g;
+    groupOpen.has(g) ? groupOpen.delete(g) : groupOpen.add(g);
+    renderList();
+  });
   $$(".filters select").forEach(s => s.classList.toggle("active", !!s.value && s.id !== "f-sort" && s.id !== "f-group"));
 }
 
@@ -1375,6 +1452,8 @@ async function saveCard(){
     memo: $("#e-memo").value.trim(),
     thumb: editing?.thumb || null
   };
+
+  if(!confirmDuplicate(c, editing?.id)) return;
 
   // 画像の保存
   const touched = [];
@@ -2122,6 +2201,7 @@ function bulkRenderReview(){
   $("#bkRows").innerHTML = bulk.items.map((it, i) => {
     const d = it.data || {};
     const low = new Set(d.lowConfidence || []);
+    const dup = findDuplicates(d, null);
     const f = ([k, ph, cls]) => `<input data-i="${i}" data-k="${k}" placeholder="${ph}"
         class="${cls || ""}${low.has(k) ? " shaky" : ""}" value="${esc(d[k] ?? "")}" autocomplete="off">`;
     return `<div class="bkrow${it.include ? "" : " off"}" data-i="${i}">
@@ -2131,6 +2211,7 @@ function bulkRenderReview(){
         <div class="bkg">${f(BULK_FIELDS[1])}${f(BULK_FIELDS[2])}</div>
         <div class="bkg">${f(BULK_FIELDS[3])}${f(BULK_FIELDS[4])}</div>
         <div class="bkg">${f(BULK_FIELDS[5])}${f(BULK_FIELDS[6])}</div>
+        ${dup.length ? `<div class="bkdup">⚠ 同じ内容のカードが既に ${dup.length} 件あります</div>` : ""}
         ${it.error ? `<div class="bkerr">${esc(it.error)}</div>` : ""}
       </div>
       <div class="bkchk"><input type="checkbox" data-inc="${i}" ${it.include ? "checked" : ""}></div>
@@ -2166,6 +2247,9 @@ async function bulkSave(){
     location:       locValue("#bk-loc"),
     tags:           $("#bk-tags").value.split(",").map(s => s.trim()).filter(Boolean)
   };
+
+  const dupN = targets.filter(it => findDuplicates(it.data || {}, null).length).length;
+  if(dupN && !confirm(`${dupN} 件は既に登録済みの可能性があります。\n\nこのまま ${targets.length} 件を登録しますか？`)) return;
 
   $("#bkNext").disabled = true;
   $("#bkNext").innerHTML = `<i class="spin"></i>登録中…`;
@@ -3146,7 +3230,7 @@ function bind(){
   // 絞り込み
   let deb;
   $("#q").oninput = () => { clearTimeout(deb); deb = setTimeout(() => { limit = 60; renderList(); }, 180); };
-  ["#f-brand","#f-year","#f-grade","#f-tag","#f-sort","#f-group"].forEach(s =>
+  ["#f-brand","#f-year","#f-grade","#f-tag","#f-special","#f-sort","#f-group"].forEach(s =>
     $(s).onchange = () => { limit = 60; renderList(); });
 
   // 一覧クリック（タイル・リストどちらも data-id で拾う）
