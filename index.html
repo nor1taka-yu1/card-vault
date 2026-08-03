@@ -316,6 +316,10 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
         <option value="new">並替：追加が新しい順</option>
         <option value="old">並替：追加が古い順</option>
         <option value="player">並替：選手名</option>
+        <option value="team">並替：クラブ / 代表</option>
+        <option value="nat">並替：国籍</option>
+        <option value="brand">並替：メーカー</option>
+        <option value="product">並替：商品名</option>
         <option value="year">並替：年（新しい順）</option>
         <option value="mhigh">並替：相場が高い順</option>
         <option value="phigh">並替：購入額が高い順</option>
@@ -806,6 +810,19 @@ const S = {
   set gdPendImg(v){ localStorage.setItem("cv.gdPendImg", JSON.stringify([...new Set(v)])); },
   get gdDirty(){ return localStorage.getItem("cv.gdDirty") === "1"; },
   set gdDirty(v){ localStorage.setItem("cv.gdDirty", v ? "1" : "0"); },
+  // 競合検出用：最後に書き込んだクラウド側の更新時刻
+  get gdMetaTime(){ return localStorage.getItem("cv.gdMetaTime") || ""; },
+  set gdMetaTime(v){ localStorage.setItem("cv.gdMetaTime", v || ""); },
+  // 削除の記録。これが無いと、他端末から消したカードが復活する
+  get gdDeleted(){ try { return JSON.parse(localStorage.getItem("cv.gdDeleted") || "[]"); } catch { return []; } },
+  set gdDeleted(v){
+    const cut = Date.now() - 180 * 86400000;      // 半年より古い記録は捨てる
+    const m = new Map();
+    v.filter(t => t && t.id && t.at > cut).forEach(t => {
+      if(!m.has(t.id) || m.get(t.id) < t.at) m.set(t.id, t.at);
+    });
+    localStorage.setItem("cv.gdDeleted", JSON.stringify([...m].map(([id, at]) => ({ id, at }))));
+  },
   get quotaAt(){ return +(localStorage.getItem("cv.quotaAt") || 0); },
   set quotaAt(v){ localStorage.setItem("cv.quotaAt", v); },
   // 上限は提供元ごとに別管理する（Gemini が尽きても Claude は使えるため）
@@ -1104,10 +1121,23 @@ function visibleCards(){
     return true;
   });
 
+  // 文字項目の並び替え。空欄は末尾に置き、同値なら登録が新しい順にする。
+  const byText = f => (a, b) => {
+    const x = tidyName(f(a) || ""), y = tidyName(f(b) || "");
+    if(!x && !y) return b.createdAt - a.createdAt;
+    if(!x) return 1;
+    if(!y) return -1;
+    return x.localeCompare(y, "ja") || (b.createdAt - a.createdAt);
+  };
+
   const cmp = {
     new:    (a, b) => b.createdAt - a.createdAt,
     old:    (a, b) => a.createdAt - b.createdAt,
-    player: (a, b) => (a.player || "").localeCompare(b.player || "", "ja"),
+    player: byText(c => c.player),
+    team:   byText(c => c.team),
+    nat:    byText(c => c.nationality),
+    brand:  byText(c => c.brand),
+    product:byText(c => [c.brand, c.product].filter(Boolean).join(" ")),
     year:   (a, b) => (b.year || "").localeCompare(a.year || ""),
     mhigh:  (a, b) => marketJPY(b) - marketJPY(a),
     phigh:  (a, b) => purchaseJPY(b) - purchaseJPY(a),
@@ -1486,6 +1516,7 @@ async function deleteCard(id){
   await dbDel("images", `${id}:front`);
   await dbDel("images", `${id}:back`);
   cards = cards.filter(c => c.id !== id);
+  S.gdDeleted = [...S.gdDeleted, { id, at: Date.now() }];   // 復活を防ぐ記録
   markDirty([`${id}:front`, `${id}:back`]);   // Drive 側の写真も消す
   closeAll(); refreshOptions(); renderList(); toast("削除しました");
 }
@@ -2769,10 +2800,10 @@ async function driveUpload(name, blob, fileId, parent){
   form.append("metadata", new Blob([JSON.stringify(meta)], { type:"application/json" }));
   form.append("file", blob);
   const base = "https://www.googleapis.com/upload/drive/v3/files";
-  const url = fileId ? `${base}/${fileId}?uploadType=multipart&fields=id`
-                     : `${base}?uploadType=multipart&fields=id`;
-  const j = await djson(url, { method: fileId ? "PATCH" : "POST", body: form });
-  return j.id;
+  const f = "fields=id,modifiedTime";
+  const url = fileId ? `${base}/${fileId}?uploadType=multipart&${f}`
+                     : `${base}?uploadType=multipart&${f}`;
+  return await djson(url, { method: fileId ? "PATCH" : "POST", body: form });
 }
 
 /** フォルダの中身を1回読んで、ファイル名 → ID の対応を作り直す。
@@ -2794,18 +2825,90 @@ async function driveIndex(parent){
   // カード情報ファイルは最新の1つだけ残し、増えてしまった分は片づける
   const metas = files.filter(f => f.name === DRIVE_META)
                      .sort((a, b) => String(b.modifiedTime || "").localeCompare(String(a.modifiedTime || "")));
+  let metaTime = "";
   if(metas.length){
     S.gdMetaFile = metas[0].id;
+    metaTime = metas[0].modifiedTime || "";
     for(const dup of metas.slice(1)) await driveDelete(dup.id);
   }else{
     S.gdMetaFile = "";
   }
-  return { files, imgCount:Object.keys(map).length, dupRemoved: Math.max(0, metas.length - 1) };
+  return { files, metaTime, imgCount:Object.keys(map).length, dupRemoved: Math.max(0, metas.length - 1) };
 }
 
 async function driveDelete(fileId){
   try { await dreq(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method:"DELETE" }); }
   catch(e){ console.warn("削除できませんでした", e); }
+}
+
+/* --- 競合の解決 --------------------------------------------------------------
+   従来は端末の内容でクラウドを丸ごと上書きしていたため、
+   他の端末で加えた変更が消えていた。
+   カード1枚ごとに updatedAt を比べ、新しい方を残す形に変える。
+   削除は「いつ消したか」を記録して同期し、消したカードが復活しないようにする。
+   ---------------------------------------------------------------------------- */
+
+/** クラウドの内容を取り込んで統合する。戻り値は変更の内訳。 */
+async function mergeCloud(cloudCards, cloudDeleted){
+  // 削除記録は両者を合わせる
+  const tomb = new Map();
+  [...(cloudDeleted || []), ...S.gdDeleted].forEach(t => {
+    if(t && t.id && (!tomb.has(t.id) || tomb.get(t.id) < t.at)) tomb.set(t.id, t.at);
+  });
+
+  const local = new Map(cards.map(c => [c.id, c]));
+  const added = [], updated = [], removed = [];
+
+  // クラウド側の内容を取り込む
+  for(const cc of cloudCards){
+    const t = tomb.get(cc.id);
+    if(t && t >= (cc.updatedAt || 0)) continue;          // 削除済みなので取り込まない
+    const lc = local.get(cc.id);
+    if(!lc){ local.set(cc.id, { ...cc, thumb:null }); added.push(cc.id); }
+    else if((cc.updatedAt || 0) > (lc.updatedAt || 0)){
+      local.set(cc.id, { ...cc, thumb: lc.thumb });      // 写真は端末のものを使い続ける
+      updated.push(cc.id);
+    }
+  }
+  // 他の端末で削除されたカードを、この端末からも消す
+  for(const [id, c] of [...local]){
+    const t = tomb.get(id);
+    if(t && t >= (c.updatedAt || 0)){ local.delete(id); removed.push(id); }
+  }
+
+  const list = [...local.values()];
+  for(const id of removed){
+    await dbDel("cards", id);
+    await dbDel("images", `${id}:front`); await dbDel("images", `${id}:back`);
+  }
+  for(const id of [...added, ...updated]) await dbPut("cards", local.get(id));
+
+  S.gdDeleted = [...tomb].map(([id, at]) => ({ id, at }));
+  cards = list.sort((a, b) => b.createdAt - a.createdAt);
+  return { added, updated, removed };
+}
+
+/** 取り込んだカードの写真をクラウドから落として、サムネイルを作る */
+async function fetchImagesFor(ids, onProgress){
+  const map = S.gdImgMap;
+  let n = 0;
+  for(const id of ids){
+    for(const side of ["front", "back"]){
+      const fid = map[`${id}:${side}`]; if(!fid) continue;
+      try{
+        const blob = await (await dreq(`https://www.googleapis.com/drive/v3/files/${fid}?alt=media`)).blob();
+        await dbPut("images", { key:`${id}:${side}`, cardId:id, side, blob });
+        if(side === "front"){
+          const c = cards.find(x => x.id === id);
+          if(c){
+            try { c.thumb = (await shrink(blob, 340, 0.72)).toDataURL("image/jpeg", 0.72); } catch {}
+            await dbPut("cards", c);
+          }
+        }
+      }catch(e){ console.warn("写真を取得できませんでした", id, side, e); }
+    }
+    n++; onProgress?.(n, ids.length);
+  }
 }
 
 /** 変更を記録して、少し待ってからまとめて送る */
@@ -2832,8 +2935,26 @@ async function syncPush(manual){
 
     // 0. Drive の実態を読み直す（更新先の取り違えと重複作成を防ぐ）
     syncBadge("⟳ 確認中");
-    await driveIndex(parent);
+    const idx = await driveIndex(parent);
     const map = S.gdImgMap;
+
+    // 前回こちらが書いた時刻と違う = 他の端末が後から書いている
+    let mergeNote = null;
+    if(S.gdMetaFile && S.gdMetaTime && idx.metaTime && idx.metaTime !== S.gdMetaTime){
+      syncBadge("⟳ 他端末の変更を取り込み中");
+      const cloud = await (await dreq(
+        `https://www.googleapis.com/drive/v3/files/${S.gdMetaFile}?alt=media`)).json();
+      if(Array.isArray(cloud.cards)){
+        const r = await mergeCloud(cloud.cards, cloud.deleted);
+        if(r.added.length) await fetchImagesFor(r.added,
+          (i, t) => syncBadge(`⟳ 取り込み中 ${i}/${t}`));
+        if(r.added.length || r.updated.length || r.removed.length){
+          mergeNote = `他の端末の変更を取り込みました\n` +
+            `　追加 ${r.added.length} 件 ／ 更新 ${r.updated.length} 件 ／ 削除 ${r.removed.length} 件`;
+          refreshOptions(); renderList();
+        }
+      }
+    }
 
     // 1. 写真を送る
     //    送信待ちリストではなく「端末にある写真」と「Driveにある写真」を突き合わせ、
@@ -2848,7 +2969,7 @@ async function syncPush(manual){
       if(!rec){ n++; continue; }
       const [cid, side] = key.split(":");
       try{
-        map[key] = await driveUpload(`img_${cid}_${side}.jpg`, rec.blob, map[key], parent);
+        map[key] = (await driveUpload(`img_${cid}_${side}.jpg`, rec.blob, map[key], parent)).id;
       }catch(err){
         console.warn("写真の送信に失敗", key, err);
         failed++;
@@ -2875,13 +2996,16 @@ async function syncPush(manual){
     syncBadge("⟳ カード情報を送信中");
     const slim = cards.map(({ thumb, ...rest }) => rest);
     const payload = { app:"cardvault", version:1, savedAt:new Date().toISOString(),
-                      rate:S.rate, cards:slim };
+                      rate:S.rate, cards:slim, deleted:S.gdDeleted };
     const blob = new Blob([JSON.stringify(payload)], { type:"application/json" });
-    S.gdMetaFile = await driveUpload(DRIVE_META, blob, S.gdMetaFile, parent);
+    const up = await driveUpload(DRIVE_META, blob, S.gdMetaFile, parent);
+    S.gdMetaFile = up.id || up;
+    S.gdMetaTime = up.modifiedTime || "";
 
     S.gdDirty = false; S.gdLast = Date.now();
     syncState = failed ? "error" : "idle"; syncBadge();
     if(failed) alert(`写真 ${failed} 枚の送信に失敗しました。\nもう一度「今すぐ同期」を押すと再試行します。`);
+    else if(mergeNote) alert(mergeNote);
     else if(manual) toast(`Google Drive に保存しました（写真 ${Object.keys(map).length} 枚）`);
   }catch(e){
     console.error(e);
@@ -2908,7 +3032,7 @@ async function syncRestore(){
   try{
     const parent = await driveFolder();
     const q = encodeURIComponent(`'${parent}' in parents and trashed=false`);
-    const list = await djson(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1000`);
+    const list = await djson(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=1000`);
     const files = list.files || [];
     const metaFile = files.find(f => f.name === DRIVE_META);
     if(!metaFile) throw new Error("保存されたデータが見つかりませんでした");
@@ -2951,6 +3075,8 @@ async function syncRestore(){
     }
     if(meta.rate) S.rate = meta.rate;
     S.gdMetaFile = metaFile.id;
+    S.gdMetaTime = metaFile.modifiedTime || "";
+    if(Array.isArray(meta.deleted)) S.gdDeleted = meta.deleted;
 
     cards = await dbAll("cards");
     cards.sort((a, b) => b.createdAt - a.createdAt);
