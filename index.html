@@ -83,6 +83,21 @@ main{padding:12px}
 .bdg.rc{background:#3a1020;color:#ff7a9a}
 .bdg.sn{background:#2a1a3a;color:#b98cff}
 
+/* ---------- selection ---------- */
+.selbar{position:fixed;left:0;right:0;bottom:0;z-index:80;display:flex;align-items:center;gap:8px;
+  padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom));
+  background:var(--panel);border-top:1px solid var(--line);
+  box-shadow:0 -6px 20px rgba(0,0,0,.4)}
+.selbar .selinfo{font-size:12px;color:var(--dim);white-space:nowrap;margin-right:auto}
+.selbar .selinfo b{color:var(--fg);font-size:15px}
+.selbar .btn{padding:9px 11px;font-size:12px}
+body.selmode main{padding-bottom:76px}
+.card.on,.lrow.on{outline:2px solid var(--accent);outline-offset:-2px;background:rgba(78,161,255,.09)}
+.selmark{position:absolute;left:5px;top:5px;width:20px;height:20px;border-radius:50%;
+  background:var(--accent);color:#fff;font-size:12px;line-height:20px;text-align:center;z-index:3}
+.card{position:relative}
+.lrow{position:relative}
+.lrow .selmark{left:auto;right:2px;top:50%;transform:translateY(-50%)}
 /* ---------- list view ---------- */
 .list{display:flex;flex-direction:column}
 .lrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid var(--line)}
@@ -158,6 +173,8 @@ legend{font-size:11px;color:var(--accent);font-weight:700;padding:0 6px}
 /* ---------- detail ---------- */
 .dimgs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .dimgs img{width:100%;border-radius:var(--r);background:#000;object-fit:contain;aspect-ratio:5/7}
+.dimg{margin:0}
+.dimg figcaption{font-size:10.5px;color:var(--dim);text-align:center;margin-top:3px}
 .dtitle{font-size:19px;font-weight:800;line-height:1.3}
 .dsub{font-size:13px;color:var(--dim);margin-top:3px}
 table.kv{width:100%;border-collapse:collapse;font-size:13px}
@@ -291,6 +308,7 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
       <input id="q" type="search" placeholder="選手名・チーム・商品名で検索" autocomplete="off">
       <button class="btn" id="btnAdd">＋</button>
       <button class="btn ghost" id="btnBulk">一括</button>
+      <button class="btn ghost" id="btnSel">選択</button>
     </div>
     <div class="filters">
       <div class="seg" id="viewSeg">
@@ -527,13 +545,9 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
   <div class="shead"><div class="stitle" id="edTitle">カードを追加</div>
     <button class="x" data-close="ovEdit">×</button></div>
   <div class="sbody">
-    <div class="imgs">
-      <div class="drop" id="dropFront"><span>表面の写真<br>タップして選択</span>
-        <input type="file" accept="image/*" id="fFront"></div>
-      <div class="drop" id="dropBack"><span>裏面の写真<br>タップして選択</span>
-        <input type="file" accept="image/*" id="fBack"></div>
-    </div>
-    <p class="note">写真は自動で圧縮して保存します（長辺1400px）。裏面は型番・シリアルの確認用です。</p>
+    <div class="imgs" id="imgSlots"></div>
+    <p class="note">写真は自動で圧縮して保存します（長辺1400px）。1枚のカードにつき5枚まで。<br>
+      裏面は型番・シリアルの確認用です。3枚目以降は鑑定ラベルやキズの記録にどうぞ。</p>
 
     <div class="quotaWarn hide" id="aiQuota"></div>
     <button class="aibtn" id="aiRun">✨ 写真からカード情報を読み取る</button>
@@ -628,6 +642,50 @@ h3.sec{font-size:13px;font-weight:700;margin:22px 0 0;color:var(--dim)}
   <div class="sfoot">
     <button class="btn ghost" id="edDelete">削除</button>
     <button class="btn" id="edSave">保存</button>
+  </div>
+</div></div>
+
+<!-- ============ 選択中の操作バー ============ -->
+<div class="selbar hide" id="selBar">
+  <div class="selinfo"><b id="selCount">0</b> 件を選択中</div>
+  <button class="btn ghost" id="selAll">表示中を全選択</button>
+  <button class="btn" id="selEdit">まとめて編集</button>
+  <button class="btn danger" id="selDel">削除</button>
+</div>
+
+<!-- ============ まとめて編集 ============ -->
+<div class="ov" id="ovBatch"><div class="sheet">
+  <div class="shead"><div class="stitle">まとめて編集</div>
+    <button class="x" data-close="ovBatch">×</button></div>
+  <div class="sbody">
+    <p class="note"><b id="batchN">0</b> 件のカードに適用します。
+      「変更しない」の項目はそのまま残ります。</p>
+
+    <fieldset><legend>保管場所</legend>
+      <select id="ba-loc"><option value="__keep">変更しない</option></select>
+    </fieldset>
+
+    <fieldset><legend>タグ</legend>
+      <div class="f"><label>追加するタグ（カンマ区切り）</label>
+        <input id="ba-tagadd" placeholder="2024年購入, 売却検討" autocomplete="off"></div>
+      <div class="f" style="margin-top:10px"><label>取り除くタグ（カンマ区切り）</label>
+        <input id="ba-tagdel" placeholder="要確認" autocomplete="off"></div>
+    </fieldset>
+
+    <fieldset><legend>その他</legend>
+      <div class="f"><label>手放し済みフラグ</label>
+        <select id="ba-sold">
+          <option value="__keep">変更しない</option>
+          <option value="1">手放し済みにする</option>
+          <option value="0">手放し済みを解除する</option>
+        </select></div>
+      <div class="f" style="margin-top:10px"><label>購入元</label>
+        <input id="ba-src" placeholder="変更しない場合は空欄" autocomplete="off"></div>
+    </fieldset>
+  </div>
+  <div class="sfoot">
+    <button class="btn ghost" data-close="ovBatch">やめる</button>
+    <button class="btn" id="baApply">適用する</button>
   </div>
 </div></div>
 
@@ -768,7 +826,7 @@ const dbCount  = s        => req(tx(s, "readonly").count());
    ========================================================= */
 let cards = [];                 // 全件（メタ＋サムネ）
 let editing = null;             // 編集中のカード
-let pendingImg = {front:null, back:null};   // {blob, thumb} 未保存の画像
+let pendingImg = {};   // {blob, thumb} 未保存の画像
 let viewingId = null;
 let limit = 60;                 // 段階描画
 const groupOpen = new Set();    // 展開中のグループ名
@@ -906,6 +964,10 @@ function tidyName(s){
 }
 
 /* --- 保管場所 --------------------------------------------------------------- */
+
+/** 写真のスロット。front / back は従来からの名前をそのまま使う */
+const IMG_SLOTS = ["front","back","x1","x2","x3"];
+const SLOT_LABEL = { front:"表面", back:"裏面", x1:"追加 1", x2:"追加 2", x3:"追加 3" };
 
 /** 保管場所のプルダウンを作る。末尾に「新しい場所を追加」を置き、登録中でも手が止まらないようにする */
 function fillLocSelect(sel, current){
@@ -1184,7 +1246,9 @@ function cardHTML(c){
   if(c.isSold)   b.push(`<i class="bdg">手放し済</i>`);
   const meta = [c.year, c.brand, c.product].filter(Boolean).join(" ");
   const mk = marketJPY(c);
-  return `<article class="card" data-id="${c.id}">
+  const on = selMode && selected.has(c.id);
+  return `<article class="card${on ? " on" : ""}" data-id="${c.id}">
+    ${on ? `<i class="selmark">✓</i>` : ""}
     ${th}
     <div class="cinfo">
       <div class="cname">${esc(c.player || "（無題）")}</div>
@@ -1209,7 +1273,9 @@ function rowHTML(c){
     ? `${c.purchaseCurrency === "USD" ? "$" : "¥"}${Number(c.purchasePrice).toLocaleString()}`
     : null;
 
-  return `<article class="lrow" data-id="${c.id}">
+  const on = selMode && selected.has(c.id);
+  return `<article class="lrow${on ? " on" : ""}" data-id="${c.id}">
+    ${on ? `<i class="selmark">✓</i>` : ""}
     ${th}
     <div class="lmain">
       <div class="lname">${esc(c.player || "（無題）")}</div>
@@ -1386,22 +1452,65 @@ function renderStats(){
 /* =========================================================
    Editor
    ========================================================= */
-function setDrop(side, thumb){
-  const d = $(side === "front" ? "#dropFront" : "#dropBack");
+/** 編集画面の写真枠を作り直す。
+ *  表裏は常に出し、追加枠は「埋まっている分＋空き1つ」だけ見せる。 */
+let slotUrl = {};                      // 表示中の画像URL（保存済みのもの）
+
+function renderImgSlots(){
+  const box = $("#imgSlots"); if(!box) return;
+  const has = sd => (pendingImg[sd] && pendingImg[sd] !== "REMOVE") ||
+                    (pendingImg[sd] !== "REMOVE" && slotUrl[sd]);
+  const extras = ["x1","x2","x3"];
+  const filled = extras.filter(has);
+  const next   = extras.find(sd => !has(sd));
+  const show   = ["front", "back", ...filled, ...(next && filled.length < 3 ? [next] : [])];
+
+  box.innerHTML = show.map(sd => `
+    <div class="drop" data-slot="${sd}">
+      <span>${SLOT_LABEL[sd]}の写真<br>タップして選択</span>
+      <input type="file" accept="image/*" data-slotin="${sd}">
+    </div>`).join("");
+
+  box.querySelectorAll("input[data-slotin]").forEach(inp => {
+    inp.onchange = async e => {
+      const sd = e.target.dataset.slotin;
+      const f = e.target.files[0]; e.target.value = "";
+      if(!f) return;
+      try{
+        toast("画像を圧縮中…");
+        pendingImg[sd] = await processImage(f);
+        renderImgSlots();
+        toast("読み込みました");
+      }catch{ toast("この画像は読み込めませんでした"); }
+    };
+  });
+  show.forEach(sd => {
+    const p = pendingImg[sd];
+    const src = p && p !== "REMOVE" ? p.thumb : (p === "REMOVE" ? null : slotUrl[sd]);
+    if(src) paintSlot(sd, src);
+  });
+}
+
+function paintSlot(side, thumb){
+  const d = $(`#imgSlots .drop[data-slot="${side}"]`); if(!d) return;
   d.querySelector("img")?.remove();
   d.querySelector(".clr")?.remove();
   if(!thumb) return;
   const img = new Image(); img.src = thumb; d.appendChild(img);
   const b = document.createElement("button");
   b.className = "clr"; b.textContent = "削除"; b.type = "button";
-  b.onclick = e => { e.preventDefault(); e.stopPropagation();
-    pendingImg[side] = "REMOVE"; setDrop(side, null); };
+  b.onclick = e => {
+    e.preventDefault(); e.stopPropagation();
+    pendingImg[side] = "REMOVE";
+    delete slotUrl[side];
+    renderImgSlots();
+  };
   d.appendChild(b);
 }
 
 async function openEditor(card){
   editing = card;
-  pendingImg = {front:null, back:null};
+  pendingImg = {};
   $("#edTitle").textContent = card ? "カードを編集" : "カードを追加";
   $("#edDelete").classList.toggle("hide", !card);
 
@@ -1420,14 +1529,14 @@ async function openEditor(card){
   $("#e-rc").checked = !!c.isRookie; $("#e-auto").checked = !!c.isAuto;
   $("#e-mem").checked = !!c.isMem;   $("#e-sold").checked = !!c.isSold;
 
-  setDrop("front", null); setDrop("back", null);
+  slotUrl = {};
   if(card){
-    for(const side of ["front", "back"]){
+    for(const side of IMG_SLOTS){
       const rec = await dbGet("images", `${card.id}:${side}`);
-      if(rec) setDrop(side, URL.createObjectURL(rec.blob));
+      if(rec) slotUrl[side] = URL.createObjectURL(rec.blob);
     }
   }
-  $("#fFront").value = ""; $("#fBack").value = "";
+  renderImgSlots();
 
   hideAIPanel();
   const aiOn = aiReady();
@@ -1491,7 +1600,7 @@ async function saveCard(){
 
   // 画像の保存
   const touched = [];
-  for(const side of ["front", "back"]){
+  for(const side of IMG_SLOTS){
     const p = pendingImg[side];
     if(p === "REMOVE"){
       await dbDel("images", `${id}:${side}`);
@@ -1517,11 +1626,10 @@ async function saveCard(){
 async function deleteCard(id){
   if(!confirm("このカードを削除します。取り消せません。")) return;
   await dbDel("cards", id);
-  await dbDel("images", `${id}:front`);
-  await dbDel("images", `${id}:back`);
+  for(const side of IMG_SLOTS) await dbDel("images", `${id}:${side}`);
   cards = cards.filter(c => c.id !== id);
   S.gdDeleted = [...S.gdDeleted, { id, at: Date.now() }];   // 復活を防ぐ記録
-  markDirty([`${id}:front`, `${id}:back`]);   // Drive 側の写真も消す
+  markDirty(IMG_SLOTS.map(sd => `${id}:${sd}`));   // Drive 側の写真も消す
   closeAll(); refreshOptions(); renderList(); toast("削除しました");
 }
 
@@ -1729,7 +1837,7 @@ const blobToB64 = async b => (await blobToDataURL(b)).split(",")[1];
  *  撮影直後なら圧縮版ではなく原本を高解像度で送る（シリアルの判読精度が上がる）。 */
 async function editorImagesB64(){
   const out = [];
-  for(const side of ["front","back"]){
+  for(const side of ["front","back"]){       // 読み取りに使うのは表裏だけ
     const p = pendingImg[side];
     if(p === "REMOVE") continue;
     if(p){
@@ -2550,6 +2658,110 @@ async function quickSavePrice(cardId){
   toast(prev ? `${mark}${v.toLocaleString()} に更新しました` : `${mark}${v.toLocaleString()} を記録しました`);
 }
 
+/* --- 複数選択してまとめて編集 ------------------------------------------------ */
+let selMode = false;
+const selected = new Set();
+
+function setSelMode(on){
+  selMode = on;
+  if(!on) selected.clear();
+  document.body.classList.toggle("selmode", on);
+  $("#selBar").classList.toggle("hide", !on);
+  $("#btnSel").textContent = on ? "選択解除" : "選択";
+  $("#btnSel").classList.toggle("ghost", !on);
+  renderSelCount();
+  renderList();
+}
+
+function renderSelCount(){
+  $("#selCount").textContent = selected.size;
+  $("#selEdit").disabled = !selected.size;
+  $("#selDel").disabled  = !selected.size;
+}
+
+function toggleSel(id){
+  selected.has(id) ? selected.delete(id) : selected.add(id);
+  renderSelCount();
+  document.querySelectorAll(`[data-id="${id}"]`).forEach(el => {
+    el.classList.toggle("on", selected.has(id));
+    el.querySelector(".selmark")?.remove();
+    if(selected.has(id)){
+      const m = document.createElement("i");
+      m.className = "selmark"; m.textContent = "✓";
+      el.appendChild(m);
+    }
+  });
+}
+
+function openBatch(){
+  if(!selected.size) return;
+  $("#batchN").textContent = selected.size;
+  fillLocSelect("#ba-loc", "__keep");
+  // 「変更しない」を先頭に入れ直す
+  const sel = $("#ba-loc");
+  sel.insertAdjacentHTML("afterbegin", `<option value="__keep">変更しない</option>`);
+  sel.value = "__keep";
+  ["#ba-tagadd","#ba-tagdel","#ba-src"].forEach(s => $(s).value = "");
+  $("#ba-sold").value = "__keep";
+  $("#ovBatch").classList.add("on");
+  document.body.style.overflow = "hidden";
+}
+
+async function applyBatch(){
+  const ids = [...selected];
+  if(!ids.length) return;
+
+  const loc    = $("#ba-loc").value;
+  const addTag = $("#ba-tagadd").value.split(",").map(s => s.trim()).filter(Boolean);
+  const delTag = $("#ba-tagdel").value.split(",").map(s => s.trim()).filter(Boolean).map(nameKey);
+  const sold   = $("#ba-sold").value;
+  const src    = $("#ba-src").value.trim();
+
+  const changing = (loc !== "__keep" && loc !== "__new") || addTag.length || delTag.length ||
+                   sold !== "__keep" || src;
+  if(!changing){ toast("変更する項目がありません"); return; }
+
+  const now = Date.now();
+  for(const id of ids){
+    const c = cards.find(x => x.id === id); if(!c) continue;
+    if(loc !== "__keep" && loc !== "__new") c.location = loc;
+    if(src) c.purchaseSource = src;
+    if(sold !== "__keep") c.isSold = sold === "1";
+    if(addTag.length || delTag.length){
+      let t = (c.tags || []).slice();
+      if(delTag.length) t = t.filter(x => !delTag.includes(nameKey(x)));
+      for(const a of addTag) if(!t.some(x => nameKey(x) === nameKey(a))) t.push(a);
+      c.tags = t;
+    }
+    c.updatedAt = now;
+    await dbPut("cards", c);
+  }
+  markDirty();
+  closeAll();
+  setSelMode(false);
+  refreshOptions(); renderList();
+  toast(`${ids.length} 件を更新しました`);
+}
+
+async function deleteSelected(){
+  const ids = [...selected];
+  if(!ids.length) return;
+  if(!confirm(`${ids.length} 件のカードを削除します。\n写真も一緒に消えます。\n\n取り消せません。よろしいですか？`)) return;
+  if(!confirm(`本当に ${ids.length} 件を削除しますか？`)) return;
+
+  const touched = [];
+  for(const id of ids){
+    await dbDel("cards", id);
+    for(const sd of IMG_SLOTS){ await dbDel("images", `${id}:${sd}`); touched.push(`${id}:${sd}`); }
+    S.gdDeleted = [...S.gdDeleted, { id, at: Date.now() }];
+  }
+  cards = cards.filter(c => !ids.includes(c.id));
+  markDirty(touched);
+  setSelMode(false);
+  refreshOptions(); renderList();
+  toast(`${ids.length} 件を削除しました`);
+}
+
 /** 相場の鮮度 */
 function priceAge(c){
   if(!c.marketUpdatedAt) return null;
@@ -2581,9 +2793,10 @@ async function openDetail(id){
   viewingId = id;
 
   const imgs = [];
-  for(const side of ["front", "back"]){
+  for(const side of IMG_SLOTS){
     const rec = await dbGet("images", `${id}:${side}`);
-    if(rec) imgs.push(`<img src="${URL.createObjectURL(rec.blob)}" alt="${side}">`);
+    if(rec) imgs.push(`<figure class="dimg"><img src="${URL.createObjectURL(rec.blob)}" alt="">
+      <figcaption>${SLOT_LABEL[side]}</figcaption></figure>`);
   }
 
   const kv = [
@@ -2821,7 +3034,7 @@ async function driveIndex(parent){
 
   const map = {};
   for(const f of files){
-    const m = f.name.match(/^img_(.+)_(front|back)\.jpg$/);
+    const m = f.name.match(/^img_(.+)_(front|back|x1|x2|x3)\.jpg$/);
     if(m) map[`${m[1]}:${m[2]}`] = f.id;
   }
   S.gdImgMap = map;
@@ -2916,7 +3129,7 @@ async function mergeCloud(cloudCards, cloudDeleted){
   const list = [...local.values()];
   for(const id of removed){
     await dbDel("cards", id);
-    await dbDel("images", `${id}:front`); await dbDel("images", `${id}:back`);
+    for(const sd of IMG_SLOTS) await dbDel("images", `${id}:${sd}`);
   }
   for(const id of [...added, ...updated]) await dbPut("cards", local.get(id));
 
@@ -2930,7 +3143,7 @@ async function fetchImagesFor(ids, onProgress){
   const map = S.gdImgMap;
   let n = 0;
   for(const id of ids){
-    for(const side of ["front", "back"]){
+    for(const side of IMG_SLOTS){
       const fid = map[`${id}:${side}`]; if(!fid) continue;
       try{
         const blob = await (await dreq(`https://www.googleapis.com/drive/v3/files/${fid}?alt=media`)).blob();
@@ -3090,7 +3303,7 @@ async function syncRestore(){
     for(const f of imgFiles){
       i++;
       btn.innerHTML = `<i class="spin"></i>写真 ${i}/${imgFiles.length}`;
-      const m = f.name.match(/^img_(.+)_(front|back)\.jpg$/);
+      const m = f.name.match(/^img_(.+)_(front|back|x1|x2|x3)\.jpg$/);
       if(!m) continue;
       const key = `${m[1]}:${m[2]}`;
       const blob = await (await dreq(`https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).blob();
@@ -3169,7 +3382,7 @@ async function syncDiagnose(){
 
     // 名前の対応が取れているかを実際のキーで確かめる
     const driveKeys = new Set(imgs.map(f => {
-      const m = f.name.match(/^img_(.+)_(front|back)\.jpg$/);
+      const m = f.name.match(/^img_(.+)_(front|back|x1|x2|x3)\.jpg$/);
       return m ? `${m[1]}:${m[2]}` : null;
     }).filter(Boolean));
     const notOnDrive = localKeys.filter(k => !driveKeys.has(k));
@@ -3410,7 +3623,21 @@ function bind(){
 
   // 一覧クリック（タイル・リストどちらも data-id で拾う）
   $("#list").onclick = e => {
-    const el = e.target.closest("[data-id]"); if(el) openDetail(el.dataset.id);
+    const el = e.target.closest("[data-id]"); if(!el) return;
+    selMode ? toggleSel(el.dataset.id) : openDetail(el.dataset.id);
+  };
+
+  // 複数選択
+  $("#btnSel").onclick  = () => setSelMode(!selMode);
+  $("#selEdit").onclick = openBatch;
+  $("#selDel").onclick  = deleteSelected;
+  $("#baApply").onclick = applyBatch;
+  $("#selAll").onclick  = () => {
+    const list = visibleCards().slice(0, limit === 60 ? 1e9 : limit);
+    const all  = visibleCards();
+    if(selected.size >= all.length){ selected.clear(); }
+    else all.forEach(c => selected.add(c.id));
+    renderSelCount(); renderList();
   };
 
   // 表示形式の切り替え
@@ -3438,18 +3665,6 @@ function bind(){
     if(o.id === "ovBulk") return bulkClose();
     closeAll();
   });
-
-  // 画像選択
-  const hook = (input, side) => $(input).onchange = async e => {
-    const f = e.target.files[0]; if(!f) return;
-    try {
-      toast("画像を圧縮中…");
-      pendingImg[side] = await processImage(f);
-      setDrop(side, pendingImg[side].thumb);
-      toast("読み込みました");
-    } catch { toast("この画像は読み込めませんでした"); }
-  };
-  hook("#fFront", "front"); hook("#fBack", "back");
 
   // 一括登録
   $("#btnBulk").onclick = () => {
